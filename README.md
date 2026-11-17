@@ -7,13 +7,13 @@
 <img src="docs/screenshots/suggestions-dark.png" width="250" alt="Type9">
 </p>
 
-<p align="center"><a href="https://github.com/DenHaIz/Type9/releases/latest"><b>Скачать / Download Type9.exe</b></a> · v0.3.3 · Windows 10/11 x64</p>
+<p align="center"><a href="https://github.com/DenHaIz/Type9/releases/latest"><b>Скачать / Download Type9.exe</b></a> · v0.3.4 · Windows 10/11 x64</p>
 
 ## Русский
 
 Подсказки при наборе в любом поле Windows (как T9) и круговое меню готовых фраз по горячей клавише.
 
-- **Подсказки:** `Tab` — вставить, `Tab`+`2`/`3` — другой вариант, `↑/↓` или колесо мыши — выбор, `Esc` — скрыть.
+- **Подсказки:** `Tab` — вставить, `Tab`+`2`/`3` — другой вариант, `↑/↓`, колесо мыши или `CapsLock` (опция) — выбор, `Esc` — скрыть.
 - **Понимает контекст и падежи**, предлагает следующее слово, учится на вашем тексте (пароли и адреса не запоминаются).
 - **Круговое меню:** зажмите `Alt+Q` (или любую клавишу/кнопку мыши), наведите на фразу, отпустите.
 - Сокращения (`здр` → «Здравствуйте, »), тёмная и светлая тема, интерфейс RU/EN, автообновление.
@@ -24,7 +24,7 @@
 
 Typing suggestions in any Windows text field (like T9) and a hotkey wheel of ready-made phrases.
 
-- **Suggestions:** `Tab` inserts, `Tab`+`2`/`3` picks another option, `↑/↓` or the mouse wheel chooses, `Esc` hides.
+- **Suggestions:** `Tab` inserts, `Tab`+`2`/`3` picks another option, `↑/↓`, the mouse wheel or `CapsLock` (optional) chooses, `Esc` hides.
 - **Context-aware** (incl. Russian word endings), predicts the next word, learns from your writing (passwords and addresses are never stored).
 - **Phrase wheel:** hold `Alt+Q` (or any key/mouse button), point at a phrase, release.
 - Abbreviations (`ty` → "Thank you! "), dark and light themes, RU/EN interface, auto-update.

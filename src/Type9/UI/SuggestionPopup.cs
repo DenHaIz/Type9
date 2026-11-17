@@ -166,6 +166,12 @@ internal sealed class SuggestionPopup : Window
         }
     }
 
+    /// <summary>Подсказка внизу упоминает CapsLock, если он листает варианты.</summary>
+    public bool CapsLockCycles
+    {
+        set => _hint.SetResourceReference(TextBlock.TextProperty, value ? "S.Pop.HintCaps" : "S.Pop.Hint");
+    }
+
     /// <summary>Клавиша варианта: у выбранного — Tab, у остальных — Tab+номер.</summary>
     private string Badge(int i) =>
         i != _selected ? $"Tab+{i + 1}" : _current[i].Kind == SuggestionKind.Abbreviation ? "Tab ⇢" : "Tab";

@@ -43,6 +43,7 @@ internal sealed class AppController : IInputSink, IDisposable
         _caret = new CaretLocator(ui);
         Engine = new InputEngine(ui, this, EngineOptions.From(settings));
         Engine.Clicked = _caret.NoteClick;
+        _popup.CapsLockCycles = settings.CapsLockCycles;
 
         _dictSaveTimer = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background, (_, _) => SaveDictionary(false), ui);
         _settingsSaveTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(400), DispatcherPriority.Background, (_, _) =>
@@ -460,6 +461,7 @@ internal sealed class AppController : IInputSink, IDisposable
     public void SettingsChanged()
     {
         Engine.Options = EngineOptions.From(Settings);
+        _popup.CapsLockCycles = Settings.CapsLockCycles;
         ThemeManager.Apply(Settings.Theme, Settings.Accent);
         if (Loc.Current != Settings.Language) Loc.Apply(Settings.Language);
         UiScale.Apply(Settings.UiScale);

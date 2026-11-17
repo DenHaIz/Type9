@@ -85,22 +85,67 @@ internal sealed class CaretLocator : IDisposable
             var rect = new Win32.RECT { Left = tl.X, Top = tl.Y, Right = Math.Max(br.X, tl.X + 1), Bottom = Math.Max(br.Y, tl.Y + 1) };
             // Некоторые программы держат невидимую «служебную» каретку в углу или вне окна — такую не берём
             if ((tl.X != 0 || tl.Y != 0) && Inside(gti.hwndCaret, rect))
-                return Precise(focusHwnd, rect, false);
+            {
+                bool isPassword = false;
+                // Qt (Telegram и др.) ставит системную каретку для экранного диктора, но её высота/вертикаль бывают неточными:
+                // уточняем по UI Automation, иначе опускаем низ каретки до низа однострочного поля — плашка не закроет текст
+                if (pid != _ownPid && IsQt(gti.hwndCaret) && !UiaRecentlyFailed(focusHwnd))
+                {
+                    var uia = TryUia(fg, out var field);
+                    double sc = Scale(rect);
+                    // Позиция от UIA берётся, только если она рядом с системной кареткой (защита от чужих координат)
+                    if (uia is { Precise: true } u && Math.Abs(u.Rect.Left - rect.Left) < 3 * LineHeight(sc)
+                        && Math.Abs(u.Rect.Top - rect.Top) < 3 * LineHeight(sc))
+                        return Precise(focusHwnd, MinLine(u.Rect), u.IsPassword);
+                    if (uia is null) NoteUiaFailed(focusHwnd);
+                    isPassword = uia?.IsPassword ?? false;
+                    if (field is { } f && f.Height < 3 * LineHeight(sc) && rect.Left >= f.Left - 4 && rect.Left <= f.Right + 4
+                        && rect.Top >= f.Top - LineHeight(sc) && rect.Top <= f.Bottom)
+                        rect.Bottom = Math.Max(rect.Bottom, f.Bottom - (int)(4 * sc));
+                }
+                return Precise(focusHwnd, MinLine(rect), isPassword);
+            }
         }
 
         if (pid != _ownPid)
         {
-            bool recentlyFailed = focusHwnd == _uiaFailedHwnd && Environment.TickCount64 - _uiaFailedAt < 5000;
-            if (!recentlyFailed)
+            if (!UiaRecentlyFailed(focusHwnd))
             {
-                var uia = TryUia(fg);
-                if (uia is { Precise: true } u) return Precise(focusHwnd, u.Rect, u.IsPassword);
+                var uia = TryUia(fg, out _);
+                if (uia is { Precise: true } u) return Precise(focusHwnd, MinLine(u.Rect), u.IsPassword);
                 if (uia is { } approx) return Fallback(fg, focusHwnd, approx.IsPassword, approx);
-                _uiaFailedHwnd = focusHwnd;
-                _uiaFailedAt = Environment.TickCount64;
+                NoteUiaFailed(focusHwnd);
             }
         }
         return Fallback(fg, focusHwnd, false);
+    }
+
+    private bool UiaRecentlyFailed(IntPtr focusHwnd) => focusHwnd == _uiaFailedHwnd && Environment.TickCount64 - _uiaFailedAt < 5000;
+
+    private void NoteUiaFailed(IntPtr focusHwnd)
+    {
+        _uiaFailedHwnd = focusHwnd;
+        _uiaFailedAt = Environment.TickCount64;
+    }
+
+    private static bool IsQt(IntPtr hwnd) =>
+        Win32.GetClassName(hwnd) is var c && c.StartsWith("Qt", StringComparison.Ordinal) && c.Contains("QWindow");
+
+    /// <summary>Масштаб монитора под кареткой (координаты уже физические).</summary>
+    private static double Scale(Win32.RECT r) => Win32.MonitorAt(r.Left, r.Top).Scale;
+
+    /// <summary>Высота строки обычного текста в физических пикселях.</summary>
+    private static int LineHeight(double scale) => (int)Math.Round(18 * scale);
+
+    /// <summary>
+    /// Каретка ниже обычной строки (некоторые программы отдают высоту 1–2 px у верха строки) — дотягиваем низ,
+    /// чтобы плашка не наезжала на набираемый текст.
+    /// </summary>
+    private static Win32.RECT MinLine(Win32.RECT r)
+    {
+        double scale = Scale(r);
+        if (r.Height < (int)Math.Round(14 * scale)) r.Bottom = r.Top + LineHeight(scale);
+        return r;
     }
 
     private CaretInfo Precise(IntPtr focusHwnd, Win32.RECT rect, bool isPassword)
@@ -132,10 +177,20 @@ internal sealed class CaretLocator : IDisposable
         return cx >= w.Left - 2 && cx <= w.Right + 2 && cy >= w.Top - 2 && cy <= w.Bottom + 2;
     }
 
-    private static CaretInfo? TryUia(IntPtr fg)
+    /// <param name="field">Границы поля ввода (физические пиксели), если оно не больше трёх строк.</param>
+    private static CaretInfo? TryUia(IntPtr fg, out Win32.RECT? field)
     {
+        field = null;
         var el = AutomationElement.FocusedElement;
         if (el is null) return null;
+
+        try
+        {
+            var fb = el.Current.BoundingRectangle;
+            if (!fb.IsEmpty && fb.Height is > 0 and < 200)
+                field = new Win32.RECT { Left = (int)fb.Left, Top = (int)fb.Top, Right = (int)fb.Right, Bottom = (int)fb.Bottom };
+        }
+        catch { /* элемент мог исчезнуть */ }
 
         bool isPassword = false;
         try { isPassword = el.Current.IsPassword; } catch { /* ignore */ }

@@ -30,13 +30,14 @@ internal sealed record SuggestionSnapshot(int Version, IReadOnlyList<Suggestion>
 /// <summary>Параметры, которые читает поток хуков (неизменяемый снимок настроек).</summary>
 internal sealed record EngineOptions(
     bool SuggestionsEnabled, bool LearnEnabled, bool SmartPunctuation, bool NewlineAsShiftEnter, bool HideInFullscreen,
-    Hotkey RadialHotkey, RadialTrigger RadialTrigger, Hotkey PauseHotkey, HashSet<string> Excluded)
+    Hotkey RadialHotkey, RadialTrigger RadialTrigger, Hotkey PauseHotkey, HashSet<string> Excluded, bool CapsLockCycles = false)
 {
     public static EngineOptions From(AppSettings s) => new(
         s.SuggestionsEnabled, s.LearnEnabled, s.SmartPunctuation, s.NewlineAsShiftEnter, s.HideInFullscreen,
         Hotkey.Parse(s.RadialHotkey), s.RadialTrigger, Hotkey.Parse(s.PauseHotkey),
         new HashSet<string>(s.ExcludedProcesses.Select(p => p.Trim().Replace(".exe", "", StringComparison.OrdinalIgnoreCase)),
-            StringComparer.OrdinalIgnoreCase));
+            StringComparer.OrdinalIgnoreCase),
+        s.CapsLockCycles);
 }
 
 /// <summary>
@@ -118,7 +119,7 @@ internal sealed class InputEngine : IDisposable
 
     // Пока текущее поле не проверено на «пароль» через UI Automation, набранное не попадает в словарь
     private volatile bool _fieldVerified;
-    private bool _capsDown, _pauseHeld;
+    private bool _capsDown, _capsCycling, _pauseHeld;
 
     public Win32.RECT PopupRect
     {
@@ -172,6 +173,23 @@ internal sealed class InputEngine : IDisposable
         {
             bool capsIsHotkey = hk.Key == Win32.VK_CAPITAL && hk.Modifiers == HotkeyModifiers.None && !_paused
                                 && Hotkey.CurrentModifiers() == HotkeyModifiers.None;
+            // Опция «CapsLock листает подсказки»: при видимых вариантах — следующий по кругу, регистр не меняется.
+            // Автоповтор и отпускание такого нажатия тоже не пропускаем в систему
+            if (_capsCycling)
+            {
+                _capsDown = down;
+                if (!down) _capsCycling = false;
+                return true;
+            }
+            if (down && !_capsDown && !capsIsHotkey && opt.CapsLockCycles && !_paused && !_radialOpen && !_suppressed
+                && opt.SuggestionsEnabled && Hotkey.CurrentModifiers() == HotkeyModifiers.None
+                && _snap is { } cs && cs.Version == Version && cs.Items.Count > 1)
+            {
+                _capsDown = _capsCycling = true;
+                _tabAccept = null;
+                MoveSelection(cs, 1);
+                return true;
+            }
             if (down && !_capsDown && !capsIsHotkey) _capsOn = !_capsOn;
             _capsDown = down;
         }
@@ -318,6 +336,15 @@ internal sealed class InputEngine : IDisposable
         return false;
     }
 
+    /// <summary>Сдвигает выбор подсказки на step позиций по кругу.</summary>
+    private void MoveSelection(SuggestionSnapshot snap, int step)
+    {
+        int n = snap.Items.Count;
+        int sel = ((snap.Selected + step) % n + n) % n;
+        _snap = snap with { Selected = sel };
+        Post(() => _sink.OnSelectionChanged(sel));
+    }
+
     private bool HandleTyping(int vk, uint scan, HotkeyModifiers mods, EngineOptions opt)
     {
         var snap = _snap;
@@ -334,10 +361,7 @@ internal sealed class InputEngine : IDisposable
                     _tabAccept = new TabAccept(snap, snap.Selected, word);
                     return true;
                 case Win32.VK_DOWN or Win32.VK_UP when snap!.Items.Count > 1:
-                    int n = snap.Items.Count;
-                    int sel = (snap.Selected + (vk == Win32.VK_DOWN ? 1 : n - 1)) % n;
-                    _snap = snap with { Selected = sel };
-                    Post(() => _sink.OnSelectionChanged(sel));
+                    MoveSelection(snap, vk == Win32.VK_DOWN ? 1 : -1);
                     return true;
                 case Win32.VK_ESCAPE:
                     ClearSuggestionsAndHide();

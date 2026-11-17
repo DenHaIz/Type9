@@ -30,6 +30,8 @@ public sealed class AppSettings
     public bool AddSpaceAfterWord { get; set; } = true;
     public bool SmartPunctuation { get; set; } = true;
     public bool GreetingComma { get; set; } = true;
+    /// <summary>CapsLock при видимой подсказке переключает вариант (по кругу), а не регистр.</summary>
+    public bool CapsLockCycles { get; set; }
     public bool NextWordPrediction { get; set; } = true;
     public int NextWordMinCount { get; set; } = 2;
     public bool LearnEnabled { get; set; } = true;
