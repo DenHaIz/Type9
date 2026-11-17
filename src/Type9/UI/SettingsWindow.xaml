@@ -1,0 +1,668 @@
+﻿<Window x:Class="Type9.UI.SettingsWindow" x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:Type9.UI.Controls"
+        xmlns:t="clr-namespace:Type9.Themes"
+        Title="{DynamicResource S.Window.Title}" Width="1020" Height="700"
+        WindowStartupLocation="Manual" Background="{DynamicResource B.Bg}"
+        FontFamily="{StaticResource F.Ui}" Foreground="{DynamicResource B.Fg}"
+        UseLayoutRounding="True" ResizeMode="CanResize"
+        TextOptions.TextFormattingMode="Ideal">
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome x:Name="Chrome" CaptionHeight="48" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <c:ValueToBoolConverter x:Key="V2B" />
+
+        <Style x:Key="RowTitle" TargetType="TextBlock" BasedOn="{StaticResource T.Body}">
+            <Setter Property="FontWeight" Value="Medium" />
+        </Style>
+
+        <!-- Левая часть строки настройки: отступ от элемента справа -->
+        <Style x:Key="RowText" TargetType="StackPanel">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,20,0" />
+        </Style>
+
+        <Style x:Key="Row" TargetType="Grid">
+            <Setter Property="Margin" Value="0,0,0,14" />
+        </Style>
+
+        <Style x:Key="Swatch" TargetType="RadioButton">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid Width="30" Height="30" Background="Transparent" RenderTransformOrigin="0.5,0.5">
+                            <Grid.RenderTransform>
+                                <ScaleTransform x:Name="Sc" />
+                            </Grid.RenderTransform>
+                            <Ellipse x:Name="Ring" Stroke="{DynamicResource B.Fg}" StrokeThickness="2" Opacity="0" />
+                            <Ellipse Margin="5" Fill="{TemplateBinding Background}" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="Ring" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.14" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="Ring" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.14" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="Sc" Storyboard.TargetProperty="ScaleX" To="1.12" Duration="0:0:0.12" />
+                                            <DoubleAnimation Storyboard.TargetName="Sc" Storyboard.TargetProperty="ScaleY" To="1.12" Duration="0:0:0.12" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="Sc" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.14" />
+                                            <DoubleAnimation Storyboard.TargetName="Sc" Storyboard.TargetProperty="ScaleY" To="1" Duration="0:0:0.14" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border x:Name="Frame" Background="{DynamicResource B.Bg}" BorderBrush="{DynamicResource B.Line}" BorderThickness="1" ClipToBounds="True">
+      <Grid>
+        <Grid x:Name="RootGrid">
+            <Grid.LayoutTransform>
+                <ScaleTransform x:Name="RootScale" ScaleX="1" ScaleY="1" />
+            </Grid.LayoutTransform>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="232" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- ===================== Навигация ===================== -->
+            <Border Background="{DynamicResource B.Surface}" BorderBrush="{DynamicResource B.Line}" BorderThickness="0,0,1,0">
+                <DockPanel Margin="12,0,12,14">
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Height="64" Margin="6,0,0,6">
+                        <Image x:Name="NavLogo" Width="30" Height="30" VerticalAlignment="Center" />
+                        <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="Type9" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock x:Name="VersionText" Style="{StaticResource T.Muted}" FontSize="11" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Border DockPanel.Dock="Bottom" Background="{DynamicResource B.Surface2}" CornerRadius="10" Padding="12,10">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse x:Name="StatusDot" Width="8" Height="8" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                <TextBlock x:Name="StatusText" FontSize="12.5" FontWeight="Medium" />
+                            </StackPanel>
+                            <TextBlock x:Name="StatusHint" Style="{StaticResource T.Muted}" FontSize="11" Margin="16,3,0,8" />
+                            <Button x:Name="PauseButton" Click="PauseButton_Click" HorizontalAlignment="Stretch" Padding="10,6" />
+                        </StackPanel>
+                    </Border>
+
+                    <StackPanel>
+                        <RadioButton Style="{StaticResource Nav}" Tag="&#xE713;" Content="{DynamicResource S.Nav.General}" x:Name="NavGeneral" Checked="Nav_Checked" CommandParameter="general" />
+                        <RadioButton Style="{StaticResource Nav}" Tag="&#xE8BD;" Content="{DynamicResource S.Nav.Phrases}" x:Name="NavPhrases" Checked="Nav_Checked" CommandParameter="phrases" />
+                        <RadioButton Style="{StaticResource Nav}" Tag="&#xE8AC;" Content="{DynamicResource S.Nav.Abbrev}" x:Name="NavAbbrev" Checked="Nav_Checked" CommandParameter="abbrev" />
+                        <RadioButton Style="{StaticResource Nav}" Tag="&#xE82D;" Content="{DynamicResource S.Nav.Dict}" x:Name="NavDict" Checked="Nav_Checked" CommandParameter="dict" />
+                        <RadioButton Style="{StaticResource Nav}" Tag="&#xE72E;" Content="{DynamicResource S.Nav.Excl}" x:Name="NavExcl" Checked="Nav_Checked" CommandParameter="excl" />
+                        <RadioButton Style="{StaticResource Nav}" Tag="&#xE946;" Content="{DynamicResource S.Nav.About}" x:Name="NavAbout" Checked="Nav_Checked" CommandParameter="about" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <!-- ===================== Контент ===================== -->
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="48" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <TextBlock x:Name="SectionTitle" Style="{StaticResource T.H1}" Margin="32,12,110,0" VerticalAlignment="Center" FontSize="18" TextTrimming="CharacterEllipsis" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+                    <Button Style="{StaticResource Btn.Caption}" Content="&#xE921;" Click="Minimize_Click" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="{DynamicResource S.Tip.Minimize}" />
+                    <Button Style="{StaticResource Btn.Caption}" Content="&#xE8BB;" Click="Close_Click" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="{DynamicResource S.Tip.Close}" />
+                </StackPanel>
+
+                <Grid x:Name="SectionHost" Grid.Row="1">
+
+                    <!-- ============ ОБЩИЕ ============ -->
+                    <ScrollViewer x:Name="SecGeneral" Tag="general" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                        <StackPanel Margin="32,8,28,24" MaxWidth="820" HorizontalAlignment="Stretch">
+
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource T.H2}" Text="{DynamicResource S.G.Appearance}" Margin="0,0,0,12" />
+                                    <Grid Style="{StaticResource Row}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Style="{StaticResource RowText}">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.Language}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.LanguageHint}" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Style="{StaticResource SegmentHost}" VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton Style="{StaticResource Segment}" Content="Русский" IsChecked="{Binding Language, Converter={StaticResource V2B}, ConverterParameter=Russian}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="English" IsChecked="{Binding Language, Converter={StaticResource V2B}, ConverterParameter=English}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                    <Grid Style="{StaticResource Row}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Style="{StaticResource RowText}">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.Theme}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.ThemeHint}" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Style="{StaticResource SegmentHost}" VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton Style="{StaticResource Segment}" Content="{DynamicResource S.G.Dark}" IsChecked="{Binding Theme, Converter={StaticResource V2B}, ConverterParameter=Dark}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="{DynamicResource S.G.Light}" IsChecked="{Binding Theme, Converter={StaticResource V2B}, ConverterParameter=Light}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="{DynamicResource S.G.System}" IsChecked="{Binding Theme, Converter={StaticResource V2B}, ConverterParameter=System}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                    <Grid Style="{StaticResource Row}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Style="{StaticResource RowText}">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.Scale}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.ScaleHint}" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Style="{StaticResource SegmentHost}" VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton Style="{StaticResource Segment}" Content="{DynamicResource S.G.Auto}" IsChecked="{Binding UiScale, Converter={StaticResource V2B}, ConverterParameter=0}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="90%" IsChecked="{Binding UiScale, Converter={StaticResource V2B}, ConverterParameter=90}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="100%" IsChecked="{Binding UiScale, Converter={StaticResource V2B}, ConverterParameter=100}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="115%" IsChecked="{Binding UiScale, Converter={StaticResource V2B}, ConverterParameter=115}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="130%" IsChecked="{Binding UiScale, Converter={StaticResource V2B}, ConverterParameter=130}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Style="{StaticResource RowText}">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.Accent}" />
+                                            <TextBlock x:Name="AccentName" Style="{StaticResource T.Muted}" />
+                                        </StackPanel>
+                                        <WrapPanel x:Name="AccentPanel" Grid.Column="1" VerticalAlignment="Center" MaxWidth="260" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource T.H2}" Text="{DynamicResource S.G.Suggestions}" Margin="0,0,0,12" />
+                                    <CheckBox IsChecked="{Binding SuggestionsEnabled}" Margin="0,0,0,14">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.ShowSugg}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.ShowSuggHint}" />
+                                        </StackPanel>
+                                    </CheckBox>
+                                    <CheckBox IsChecked="{Binding NextWordPrediction}" Margin="0,0,0,14">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.NextWord}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.NextWordHint}" />
+                                        </StackPanel>
+                                    </CheckBox>
+                                    <CheckBox IsChecked="{Binding AddSpaceAfterWord}" Margin="0,0,0,14">
+                                        <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.AddSpace}" />
+                                    </CheckBox>
+                                    <CheckBox IsChecked="{Binding SmartPunctuation}" Margin="0,0,0,14">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.SmartPunct}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.SmartPunctHint}" />
+                                        </StackPanel>
+                                    </CheckBox>
+                                    <CheckBox IsChecked="{Binding LearnEnabled}" Margin="0,0,0,14">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.Learn}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.LearnHint}" />
+                                        </StackPanel>
+                                    </CheckBox>
+                                    <CheckBox IsChecked="{Binding HideInFullscreen}" Margin="0,0,0,16">
+                                        <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.HideFull}" />
+                                    </CheckBox>
+
+                                    <Grid Style="{StaticResource Row}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Style="{StaticResource RowText}">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.MinPrefix}" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Style="{StaticResource SegmentHost}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton Style="{StaticResource Segment}" Content="{DynamicResource S.G.L1}" IsChecked="{Binding MinPrefix, Converter={StaticResource V2B}, ConverterParameter=1}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="{DynamicResource S.G.L2}" IsChecked="{Binding MinPrefix, Converter={StaticResource V2B}, ConverterParameter=2}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="{DynamicResource S.G.L3}" IsChecked="{Binding MinPrefix, Converter={StaticResource V2B}, ConverterParameter=3}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="{DynamicResource S.G.L4}" IsChecked="{Binding MinPrefix, Converter={StaticResource V2B}, ConverterParameter=4}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                    <Grid Style="{StaticResource Row}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Style="{StaticResource RowText}">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.Count}" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Style="{StaticResource SegmentHost}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton Style="{StaticResource Segment}" Content="1" IsChecked="{Binding MaxSuggestions, Converter={StaticResource V2B}, ConverterParameter=1}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="2" IsChecked="{Binding MaxSuggestions, Converter={StaticResource V2B}, ConverterParameter=2}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="3" IsChecked="{Binding MaxSuggestions, Converter={StaticResource V2B}, ConverterParameter=3}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="4" IsChecked="{Binding MaxSuggestions, Converter={StaticResource V2B}, ConverterParameter=4}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="5" IsChecked="{Binding MaxSuggestions, Converter={StaticResource V2B}, ConverterParameter=5}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Style="{StaticResource RowText}">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.Where}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.WhereHint}" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Style="{StaticResource SegmentHost}" VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton Style="{StaticResource Segment}" Content="{DynamicResource S.G.AtCaret}" IsChecked="{Binding Placement, Converter={StaticResource V2B}, ConverterParameter=Caret}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="{DynamicResource S.G.Corner}" IsChecked="{Binding Placement, Converter={StaticResource V2B}, ConverterParameter=Fixed}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource T.H2}" Text="{DynamicResource S.G.Hotkeys}" Margin="0,0,0,12" />
+                                    <Grid Style="{StaticResource Row}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Style="{StaticResource RowText}">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.Wheel}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.WheelHint}" />
+                                        </StackPanel>
+                                        <c:HotkeyBox Grid.Column="1" Hotkey="{Binding RadialHotkey}" VerticalAlignment="Center" Width="180" />
+                                    </Grid>
+                                    <Grid Style="{StaticResource Row}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Style="{StaticResource RowText}">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.WheelMode}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.WheelModeHint}" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Style="{StaticResource SegmentHost}" VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton Style="{StaticResource Segment}" Content="{DynamicResource S.G.Hold}" IsChecked="{Binding RadialTrigger, Converter={StaticResource V2B}, ConverterParameter=Hold}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="{DynamicResource S.G.Toggle}" IsChecked="{Binding RadialTrigger, Converter={StaticResource V2B}, ConverterParameter=Toggle}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                    <Grid Style="{StaticResource Row}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Style="{StaticResource RowText}">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.PauseKey}" />
+                                        </StackPanel>
+                                        <c:HotkeyBox Grid.Column="1" Hotkey="{Binding PauseHotkey}" AllowMouse="False" Width="180" />
+                                    </Grid>
+                                    <CheckBox IsChecked="{Binding NewlineAsShiftEnter}" Margin="0,0,0,14">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.ShiftEnter}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.ShiftEnterHint}" />
+                                        </StackPanel>
+                                    </CheckBox>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Style="{StaticResource RowText}">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.Insert}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.InsertHint}" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Style="{StaticResource SegmentHost}" VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton Style="{StaticResource Segment}" Content="{DynamicResource S.G.Auto}" IsChecked="{Binding InsertMethod, Converter={StaticResource V2B}, ConverterParameter=Auto}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="{DynamicResource S.G.Typing}" IsChecked="{Binding InsertMethod, Converter={StaticResource V2B}, ConverterParameter=Typing}" />
+                                                <RadioButton Style="{StaticResource Segment}" Content="{DynamicResource S.G.Clipboard}" IsChecked="{Binding InsertMethod, Converter={StaticResource V2B}, ConverterParameter=Clipboard}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource T.H2}" Text="{DynamicResource S.G.Startup}" Margin="0,0,0,12" />
+                                    <CheckBox IsChecked="{Binding Autostart}" Margin="0,0,0,14" Click="Autostart_Click">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.Autostart}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.AutostartHint}" />
+                                        </StackPanel>
+                                    </CheckBox>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Style="{StaticResource RowText}">
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.Mode}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.ModeHint}" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Style="{StaticResource SegmentHost}" VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton x:Name="ModeNormal" Style="{StaticResource Segment}" Content="{DynamicResource S.G.ModeNormal}" Click="Mode_Click" />
+                                                <RadioButton x:Name="ModeElevated" Style="{StaticResource Segment}" Content="{DynamicResource S.G.ModeAdmin}" Click="Mode_Click" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                    <TextBlock x:Name="ModeStatus" Style="{StaticResource T.Muted}" Margin="0,10,0,0" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- ============ КРУГОВОЕ МЕНЮ ============ -->
+                    <Grid x:Name="SecPhrases" Tag="phrases" Visibility="Collapsed" Margin="32,8,28,24">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="280" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="*" MinWidth="320" />
+                        </Grid.ColumnDefinitions>
+
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" MinHeight="150" />
+                                <RowDefinition Height="12" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Border Style="{StaticResource Card}" Margin="0">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource T.H2}" Text="{DynamicResource S.P.Groups}" Margin="0,0,0,4" />
+                                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource T.Muted}" Text="{DynamicResource S.P.GroupsHint}" Margin="0,0,0,8" />
+                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+                                        <Button Content="{DynamicResource S.P.AddGroup}" Click="AddGroup_Click" Margin="0,0,6,0" />
+                                        <Button Style="{StaticResource Btn.Icon}" Content="&#xE70E;" Click="GroupUp_Click" ToolTip="{DynamicResource S.Tip.Up}" />
+                                        <Button Style="{StaticResource Btn.Icon}" Content="&#xE70D;" Click="GroupDown_Click" ToolTip="{DynamicResource S.Tip.Down}" />
+                                        <Button Style="{StaticResource Btn.Icon}" Content="&#xE74D;" Click="DeleteGroup_Click" ToolTip="{DynamicResource S.Tip.DeleteGroup}" />
+                                    </StackPanel>
+                                    <ListBox x:Name="GroupList" ItemsSource="{Binding Groups}" SelectionChanged="GroupList_SelectionChanged">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid t:Anim.Appear="True">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" FontSize="13" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding Phrases.Count}" Foreground="{DynamicResource B.FgMuted}" FontSize="12" Margin="8,0,0,0" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </DockPanel>
+                            </Border>
+                            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0" Padding="8">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.P.Preview}" HorizontalAlignment="Center" Margin="0,2,0,4" />
+                                    <Viewbox Height="220" Stretch="Uniform">
+                                        <c:RadialView x:Name="Preview" InteractiveHover="True" Margin="10" />
+                                    </Viewbox>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <Border Grid.Column="2" Style="{StaticResource Card}" Margin="0" x:Name="GroupEditor">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Top">
+                                    <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.P.GroupName}" Margin="0,0,0,4" />
+                                    <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Tag="{DynamicResource S.P.GroupNameHint}" Margin="0,0,0,12" />
+                                </StackPanel>
+                                <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                                    <Button x:Name="AddPhraseButton" Content="{DynamicResource S.P.AddPhrase}" Click="AddPhrase_Click" HorizontalAlignment="Left" />
+                                    <TextBlock Style="{StaticResource T.Muted}" Margin="0,8,0,0" Text="{DynamicResource S.P.Help}" />
+                                </StackPanel>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl x:Name="PhraseItems" ItemsSource="{Binding Phrases}" AlternationCount="8">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border t:Anim.Appear="True" Background="{DynamicResource B.Surface2}" CornerRadius="10" Padding="10" Margin="0,0,6,8">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="30" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Border Width="22" Height="22" CornerRadius="11" Background="{DynamicResource B.AccentSoft}" VerticalAlignment="Top" Margin="0,5,0,0">
+                                                            <TextBlock Text="{Binding (ItemsControl.AlternationIndex), RelativeSource={RelativeSource AncestorType=ContentPresenter}, Converter={x:Static c:IndexPlusOne.Instance}}"
+                                                                       FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource B.AccentFg}" />
+                                                        </Border>
+                                                        <StackPanel Grid.Column="1">
+                                                            <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" Tag="{DynamicResource S.P.TextHint}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="34" MaxHeight="120"
+                                                                     VerticalScrollBarVisibility="Auto" Margin="0,0,0,6" />
+                                                            <TextBox Text="{Binding Label, UpdateSourceTrigger=PropertyChanged}" Tag="{DynamicResource S.P.LabelHint}" FontSize="12" Padding="9,4" />
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Column="2" Margin="6,0,0,0">
+                                                            <Button Style="{StaticResource Btn.Icon}" Content="&#xE70E;" Click="PhraseUp_Click" ToolTip="{DynamicResource S.Tip.Up}" />
+                                                            <Button Style="{StaticResource Btn.Icon}" Content="&#xE70D;" Click="PhraseDown_Click" ToolTip="{DynamicResource S.Tip.Down}" />
+                                                            <Button Style="{StaticResource Btn.Icon}" Content="&#xE74D;" Click="PhraseDelete_Click" ToolTip="{DynamicResource S.Tip.Delete}" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </DockPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- ============ СОКРАЩЕНИЯ ============ -->
+                    <Grid x:Name="SecAbbrev" Tag="abbrev" Visibility="Collapsed" Margin="32,8,28,24">
+                        <Border Style="{StaticResource Card}" Margin="0" MaxWidth="860" HorizontalAlignment="Stretch">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                                    <TextBlock Style="{StaticResource T.H2}" Text="{DynamicResource S.A.Title}" />
+                                    <TextBlock Style="{StaticResource T.Muted}" Margin="0,4,0,0" Text="{DynamicResource S.A.Help}" />
+                                </StackPanel>
+                                <Button DockPanel.Dock="Bottom" Content="{DynamicResource S.A.Add}" Click="AddAbbrev_Click" HorizontalAlignment="Left" Margin="0,10,0,0" />
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl x:Name="AbbrevItems" ItemsSource="{Binding Abbreviations}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid t:Anim.Appear="True" Margin="0,0,6,8">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="150" />
+                                                        <ColumnDefinition Width="10" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBox Text="{Binding Key, UpdateSourceTrigger=PropertyChanged}" Tag="{DynamicResource S.A.KeyHint}" VerticalAlignment="Top" />
+                                                    <TextBox Grid.Column="2" Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" Tag="{DynamicResource S.A.TextHint}" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="110" VerticalScrollBarVisibility="Auto" />
+                                                    <Button Grid.Column="3" Style="{StaticResource Btn.Icon}" Content="&#xE74D;" Click="AbbrevDelete_Click" ToolTip="{DynamicResource S.Tip.Delete}" VerticalAlignment="Top" Margin="6,2,0,0" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </DockPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- ============ СЛОВАРЬ ============ -->
+                    <Grid x:Name="SecDict" Tag="dict" Visibility="Collapsed" Margin="32,8,28,24">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Style="{StaticResource Card}" Margin="0">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Top">
+                                    <TextBlock Style="{StaticResource T.H2}" Text="{DynamicResource S.D.Learned}" />
+                                    <TextBlock x:Name="DictStats" Style="{StaticResource T.Muted}" Margin="0,4,0,10" />
+                                    <TextBox x:Name="DictSearch" Tag="{DynamicResource S.D.Search}" TextChanged="DictSearch_TextChanged" Margin="0,0,0,8" />
+                                </StackPanel>
+                                <WrapPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                                    <Button Content="{DynamicResource S.D.Delete}" Click="DeleteWord_Click" Margin="0,0,6,6" />
+                                    <Button Content="{DynamicResource S.D.Export}" Click="ExportDict_Click" Margin="0,0,6,6" />
+                                    <Button Content="{DynamicResource S.D.Import}" Click="ImportDict_Click" Margin="0,0,6,6" />
+                                    <Button x:Name="ClearDictButton" Content="{DynamicResource S.D.Clear}" Click="ClearDict_Click" Margin="0,0,6,6" />
+                                </WrapPanel>
+                                <ListBox x:Name="WordList" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" SelectionMode="Extended">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Form}" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Count}" Foreground="{DynamicResource B.FgMuted}" FontSize="12" Margin="8,0,0,0" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </DockPanel>
+                        </Border>
+                        <Border Grid.Column="2" Style="{StaticResource Card}" Margin="0">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Top">
+                                    <TextBlock Style="{StaticResource T.H2}" Text="{DynamicResource S.D.Train}" />
+                                    <TextBlock Style="{StaticResource T.Muted}" Margin="0,4,0,10" Text="{DynamicResource S.D.TrainHelp}" />
+                                </StackPanel>
+                                <Grid DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button Style="{StaticResource Btn.Accent}" Content="{DynamicResource S.D.TrainBtn}" Click="Train_Click" Margin="0,0,6,0" />
+                                    <Button Grid.Column="1" Content="{DynamicResource S.D.TrainFile}" Click="TrainFile_Click" />
+                                    <TextBlock Grid.Column="2" x:Name="TrainResult" Style="{StaticResource T.Muted}" VerticalAlignment="Center" Margin="12,0,0,0" TextTrimming="CharacterEllipsis" />
+                                </Grid>
+                                <TextBox x:Name="TrainText" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"
+                                         Tag="{DynamicResource S.D.TrainSample}" />
+                            </DockPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- ============ ИСКЛЮЧЕНИЯ ============ -->
+                    <Grid x:Name="SecExcl" Tag="excl" Visibility="Collapsed" Margin="32,8,28,24">
+                        <Border Style="{StaticResource Card}" Margin="0" MaxWidth="660" HorizontalAlignment="Left">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                                    <TextBlock Style="{StaticResource T.H2}" Text="{DynamicResource S.E.Title}" />
+                                    <TextBlock Style="{StaticResource T.Muted}" Margin="0,4,0,0" Text="{DynamicResource S.E.Help}" />
+                                </StackPanel>
+                                <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="ExclInput" Tag="{DynamicResource S.E.Input}" KeyDown="ExclInput_KeyDown" />
+                                        <Button Grid.Column="1" Content="{DynamicResource S.E.Add}" Click="AddExcl_Click" Margin="6,0,0,0" />
+                                    </Grid>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="PickProcessButton" Content="{DynamicResource S.E.Pick}" Click="PickProcess_Click" Margin="0,0,6,0" />
+                                        <Button Content="{DynamicResource S.E.Remove}" Click="RemoveExcl_Click" />
+                                    </StackPanel>
+                                </StackPanel>
+                                <ListBox x:Name="ExclList">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock t:Anim.Appear="True" Text="{Binding}" FontSize="13" />
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </DockPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- ============ О ПРОГРАММЕ ============ -->
+                    <ScrollViewer x:Name="SecAbout" Tag="about" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="32,8,28,24" MaxWidth="760" HorizontalAlignment="Left">
+                            <Border Style="{StaticResource Card}" Padding="24">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Image x:Name="AboutLogo" Width="132" Height="132" VerticalAlignment="Top" RenderTransformOrigin="0.5,0.5" />
+                                    <StackPanel Grid.Column="1" Margin="24,4,0,0">
+                                        <TextBlock Text="Type9" Style="{StaticResource T.H1}" FontSize="26" />
+                                        <TextBlock x:Name="AboutVersion" Style="{StaticResource T.Muted}" Margin="0,2,0,12" />
+                                        <TextBlock Style="{StaticResource T.Body}" Text="{DynamicResource S.Ab.Desc}" />
+                                        <TextBlock Style="{StaticResource T.Muted}" Margin="0,10,0,0" Text="© denhaiz · github.com/DenHaIz/Type9" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource T.H2}" Text="{DynamicResource S.Ab.Cheat}" Margin="0,0,0,10" />
+                                    <Grid x:Name="CheatSheet" />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource T.H2}" Text="{DynamicResource S.Ab.Data}" Margin="0,0,0,6" />
+                                    <TextBlock x:Name="DataPath" Style="{StaticResource T.Muted}" Margin="0,0,0,10" />
+                                    <WrapPanel>
+                                        <Button Content="{DynamicResource S.Ab.OpenFolder}" Click="OpenDataFolder_Click" Margin="0,0,6,6" />
+                                        <Button Content="{DynamicResource S.Ab.Exit}" Click="Exit_Click" Margin="0,0,6,6" />
+                                    </WrapPanel>
+                                    <TextBlock Style="{StaticResource T.Muted}" Margin="0,8,0,0" Text="{DynamicResource S.Ab.DictHint}" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+        </Grid>
+        <!-- Снимок старой темы: плавно растворяется при смене оформления -->
+        <Image x:Name="ThemeOverlay" IsHitTestVisible="False" Visibility="Collapsed" Stretch="Fill" />
+      </Grid>
+    </Border>
+</Window>

@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Type9</AssemblyName>
+    <RootNamespace>Type9</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.1.0</Version>
+    <Product>Type9</Product>
+    <Description>Автодополнение и круговое меню фраз для Windows</Description>
+    <SatelliteResourceLanguages>en;ru</SatelliteResourceLanguages>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <TieredPGO>true</TieredPGO>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <Authors>denhaiz</Authors>
+    <Company>denhaiz</Company>
+    <Copyright>© denhaiz</Copyright>
+    <RepositoryUrl>https://github.com/DenHaIz/Type9</RepositoryUrl>
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+  </PropertyGroup>
+
+  <!-- Иконка генерируется самим приложением (ключ export-icon), см. build/build.ps1 -->
+  <PropertyGroup Condition="Exists('Resources\type9.ico')">
+    <ApplicationIcon>Resources\type9.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WPF и WinForms одновременно: убираем конфликтующие неявные using -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Dict\*.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Type9.Tests" />
+  </ItemGroup>
+
+</Project>
