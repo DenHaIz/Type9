@@ -35,7 +35,8 @@ src/Type9/
     InputEngine.cs         ядро: разбор ввода, «поглотить ли клавишу», Tab/↑/↓/Esc, хоткеи меню, отложенное обучение
     TypingTracker.cs       хвост набранного текста → текущее слово + 2 предыдущих, позиция, фильтр «адресов» (чистая логика)
     TextInjector.cs        SendInput (KEYEVENTF_UNICODE) с InjectionMarker; CaseHelper
-    CaretLocator.cs        позиция каретки и «это пароль?»: GetGUIThreadInfo → UI Automation → курсор (отдельный MTA-поток)
+    CaretLocator.cs        позиция каретки и «это пароль?»: GetGUIThreadInfo (с пересчётом DPI) → UI Automation →
+                           последняя точная позиция / место клика → курсор (отдельный MTA-поток)
     Hotkey.cs              сочетания, одиночные клавиши/модификаторы (RCtrl…), кнопки мыши
     HotkeyAdvisor.cs       предупреждения о конфликтах хоткеев (Ctrl+C, F5, Mouse4…)
   Prediction/
@@ -49,6 +50,7 @@ src/Type9/
     AppController.cs       связка движка, предсказания и окон; модели нужного языка; обновления; проверка полей; прогрев
     Updater.cs             GitHub Releases → Type9.exe + обязательный SHA256SUMS.txt, подмена exe через .old
     PhraseBook.cs          наборы фраз RU/EN, Version, миграция нетронутых наборов прошлых версий
+    UiWatchdog.cs          сторож UI-потока: запись в лог, если интерфейс не отвечает > 6 с (с указанием экрана)
     AppSettings.cs, Storage.cs (атомарная запись), Placeholders.cs, Loc.cs (все строки RU/EN), SystemIntegration.cs
   Themes/                  ThemeManager (палитры, акценты), Controls.xaml, Motion (длительности), UiScale + Anim
   UI/                      SuggestionPopup, RadialMenuWindow + Controls/RadialView, SettingsWindow, TrayIcon,
@@ -61,11 +63,12 @@ build/build.ps1            публикация dist\Type9.exe (self-contained, 
 
 ## Как выпустить версию
 
-1. Поднять `<Version>` в `src/Type9/Type9.csproj` (формат `0.X.Y`; тег — `v0.X` или `v0.X.Y` для исправлений).
-2. Переписать `docs/RELEASE_NOTES.md` (без BOM — он становится текстом релиза).
+1. Поднять `<Version>` в `src/Type9/Type9.csproj` (формат `0.X.Y`; тег — `v0.X.Y`) и версию в строке загрузки README.
+2. Переписать `docs/RELEASE_NOTES.md` — он становится текстом релиза. Требование владельца: **коротко, 1–3 строки,
+   одинаковый текст на двух языках** (абзац **RU** и абзац **EN**), без BOM. README тоже держать коротким и двуязычным.
 3. `dotnet test Type9.sln` и `.\build\build.ps1` локально.
-4. Коммит от `denhaiz <denhaiz@users.noreply.github.com>`, без строк соавторства; `git tag -a v0.X -m "Type9 v0.X"`;
-   `git push origin main` и `git push origin v0.X`.
+4. Коммит от `denhaiz <denhaiz@users.noreply.github.com>`, без строк соавторства; `git tag -a v0.X.Y -m "Type9 v0.X.Y"`;
+   `git push origin main` и `git push origin v0.X.Y`.
 5. Workflow сам соберёт exe, посчитает SHA-256 и создаст релиз. Установленные копии обновятся в течение 6 ч
    (или сразу по кнопке «Проверить сейчас»).
 
@@ -132,6 +135,8 @@ dotnet run -c Release --project tools/DictBuilder -- --lang en --freq en_full.tx
   при прыжке > 100° — проявляется на месте. Радиальный градиент акцента даёт перелив; подпись меняет цвет за то же время.
   Фоны секторов не анимируются — каждый кадр меняет только поворот/прозрачность (дёшево для layered-окна на iGPU).
   Смена страниц — перекрёстная анимация двух слоёв с BitmapCache.
+- Превью колеса в настройках — тот же `RadialView` с `Lightweight="True"` (без тени и BitmapCache) и `TextBoost`
+  (крупнее подписи), в Viewbox фиксированного размера 264×264 без округления раскладки.
 - Стандартный набор — 3 группы по 8 фраз (Приветствия, Ответы, Завершение); `PhraseBook.CurrentDefaultsVersion = 4`,
   нетронутые наборы v0.1–v0.3 (`LegacyPhraseTexts` + `V3PhraseTexts`) заменяются при запуске.
 
@@ -172,7 +177,6 @@ dotnet run -c Release --project tools/DictBuilder -- --lang en --freq en_full.tx
   0.3.1 и 0.3.2). В 0.3.3 превью сделано облегчённым (`RadialView.Lightweight`: без DropShadowEffect и BitmapCache
   внутри Viewbox) и фиксированного размера. Если повторится — смотреть в log.txt запись `UiWatchdog`
   («Интерфейс не отвечает … экран: настройки: phrases»); при необходимости снять дамп процесса из диспетчера задач.
-
 - **Доверие к обновлениям = доверие к GitHub-аккаунту.** SHA256SUMS.txt лежит в том же релизе, что и exe: это защита
   целостности, а не подлинности. Следующий шаг — подпись exe (Authenticode) или подписанный манифест с открытым ключом,
   зашитым в программу (закрытый ключ — в секретах GitHub Actions).
@@ -203,7 +207,10 @@ dotnet run -c Release --project tools/DictBuilder -- --lang en --freq en_full.tx
   запятая после приветствий.
 - **Автообновление end-to-end**: собранная из тега v0.2 программа сама скачала v0.3, проверила SHA-256,
   перезапустилась; личный словарь сохранился, нетронутый старый набор фраз мигрировал, `.old` удалён.
-- Вёрстка всех разделов настроек, колеса и плашки (`--snapshot`): тёмная/светлая тема, RU/EN, 100% и 130%.
+- Вёрстка всех разделов настроек, колеса и плашки (`--snapshot`): тёмная/светлая тема, RU/EN, масштабы 85–130%.
+- Раздел «Круговое меню»: перебор ~3700 размеров окна (`TYPE9_SNAPSHOT_SWEEP`) на сборках 0.3.1–0.3.3 со стандартным
+  набором, набором v0.3 (6 групп) и 8 группами длинных фраз — без зависаний.
+- Релизы v0.3.1–v0.3.3 собраны GitHub Actions, `releases/latest` = v0.3.3; exe запускается, ошибок в логе нет.
 - Независимый аудит кода (13 находок) — исправлено всё, кроме перечисленного в «Известных рисках».
 - `Type9.exe` (Release, ReadyToRun): модель «ru» грузится за ~0,7 с, в простое CPU ≈ 0, ~68 МБ приватной памяти.
 
@@ -215,6 +222,8 @@ dotnet run -c Release --project tools/DictBuilder -- --lang en --freq en_full.tx
 2. Круговое меню: Alt+Q, одиночный RCtrl/CapsLock/Mouse4, колесо мыши, цифры, Esc; три монитора с разным масштабом.
 3. Режим администратора: UAC, задача Планировщика, работа в окне «от администратора».
 4. Чёткость на мониторах 125/150% и при переносе окна настроек между мониторами с разным DPI (`PixelAlign` + `DpiChanged`).
+5. У пользователя: открывается ли «Круговое меню» в настройках на 0.3.3; плавность новой подсветки колеса на 60 Гц / iGPU;
+   положение плашки в 1С.
 
 ## Идеи
 

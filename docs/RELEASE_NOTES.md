@@ -1,15 +1,5 @@
-Type9 v0.3.3 — исправление: раздел «Круговое меню» в настройках мог зависать.
+**RU** — Исправлено зависание раздела «Круговое меню» в настройках. Если интерфейс перестанет отвечать, это будет записано в `%AppData%\Type9\log.txt`.
 
-**Исправлено**
-- Раздел «Круговое меню» в настройках мог не открываться: окно переставало отвечать. Превью колеса теперь рисуется облегчённо (без размытой тени и кеширования в текстуру внутри масштабирования — на некоторых видеодрайверах это подвешивало отрисовку окна) и имеет фиксированный размер.
-- Защита выравнивания по пикселям: если Windows раз за разом сбрасывает масштаб окна, программа больше не спорит с ней.
+**EN** — Fixed the settings "Phrase wheel" section freezing. If the UI ever stops responding, it is now recorded in `%AppData%\Type9\log.txt`.
 
-**Диагностика**
-- Если интерфейс перестанет отвечать дольше 6 секунд, в `%AppData%\Type9\log.txt` появится запись с указанием, где это произошло. Если проблема повторится — пришлите этот файл.
-
-**Скачать**
-- `Type9.exe` — один файл. Версии 0.2–0.3.2 обновятся автоматически (или «Общие → Обновления → Проверить сейчас»).
-
----
-
-Type9 v0.3.3: fixes the settings "Phrase wheel" section hanging (lightweight fixed-size preview without blur/bitmap cache inside a Viewbox), guards pixel alignment against DPI ping-pong, adds a UI hang watchdog that logs where the UI froze.
+`Type9.exe` — один файл / single file. Старые версии обновятся сами / older versions update automatically.
