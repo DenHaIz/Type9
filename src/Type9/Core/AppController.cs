@@ -70,29 +70,155 @@ internal sealed class AppController : IInputSink, IDisposable
         // Словари грузятся в фоне — программа доступна сразу
         Task.Run(() =>
         {
-            var baseDict = BaseDictionary.LoadDefault();
+            var extras = BaseDictionary.LoadExtras();
             UserModel user;
             try { user = File.Exists(Paths.UserDict) ? UserModel.Parse(File.ReadAllText(Paths.UserDict)) : new UserModel(); }
             catch (Exception ex) { Log.Error("Не удалось загрузить пользовательский словарь", ex); user = new UserModel(); }
             _ui.BeginInvoke(() =>
             {
-                Prediction.Base = baseDict;
+                Prediction.Extra = extras;
                 Prediction.User = user;
                 DictionaryChanged?.Invoke();
-                TrimMemory();
-                Log.Info($"Словари загружены: базовый {baseDict.Count}, пользовательский {user.WordCount}");
+                Log.Info($"Личный словарь: {user.WordCount} слов, дополнительный: {extras.Count}");
             });
         });
+        EnsureLanguageModels();
 
         Engine.Start();
         _tray = new TrayIcon(this);
         _dictSaveTimer.Start();
+        StartUpdateSchedule();
     }
+
+    /// <summary>
+    /// Держим в памяти только модели выбранного языка подсказок (~10–14 МБ каждая).
+    /// Загрузка — в фоне; ненужная модель выгружается.
+    /// </summary>
+    private void EnsureLanguageModels()
+    {
+        bool needRu = Settings.SuggestLanguage is SuggestLanguage.Russian or SuggestLanguage.Both;
+        bool needEn = Settings.SuggestLanguage is SuggestLanguage.English or SuggestLanguage.Both;
+        bool unloaded = false;
+        if (!needRu && Prediction.Russian is not null) { Prediction.Russian = null; unloaded = true; }
+        if (!needEn && Prediction.English is not null) { Prediction.English = null; unloaded = true; }
+        if (unloaded) _ui.BeginInvoke(TrimMemory, DispatcherPriority.ApplicationIdle);
+
+        void Load(string lang, Action<LanguageModel> assign)
+        {
+            Task.Run(() =>
+            {
+                try
+                {
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var m = LanguageModel.LoadEmbedded(lang);
+                    if (m is null) return;
+                    _ui.BeginInvoke(() =>
+                    {
+                        assign(m);
+                        DictionaryChanged?.Invoke();
+                        Log.Info($"Модель «{lang}» загружена за {sw.ElapsedMilliseconds} мс: {m.Count} слов");
+                        _ui.BeginInvoke(() => { TrimMemory(); WarmUp(); }, DispatcherPriority.ApplicationIdle);
+                    });
+                }
+                catch (Exception ex) { Log.Error($"Не удалось загрузить модель {lang}", ex); }
+            });
+        }
+
+        if (needRu && Prediction.Russian is null && !_loadingRu)
+        {
+            _loadingRu = true;
+            Load("ru", m => { if (Settings.SuggestLanguage != SuggestLanguage.English) Prediction.Russian = m; _loadingRu = false; });
+        }
+        if (needEn && Prediction.English is null && !_loadingEn)
+        {
+            _loadingEn = true;
+            Load("en", m => { if (Settings.SuggestLanguage != SuggestLanguage.Russian) Prediction.English = m; _loadingEn = false; });
+        }
+    }
+
+    private bool _loadingRu, _loadingEn;
+
+    // ------------------------------------------------------------------ обновления
+
+    private DispatcherTimer? _updateTimer;
+    private bool _updating;
+
+    public ReleaseInfo? AvailableUpdate { get; private set; }
+    public string UpdateStatus { get; private set; } = "";
+    public double UpdateProgress { get; private set; } = -1;
+    public event Action? UpdateStateChanged;
+
+    private void SetUpdateStatus(string text, double progress = -1)
+    {
+        UpdateStatus = text;
+        UpdateProgress = progress;
+        UpdateStateChanged?.Invoke();
+    }
+
+    private void StartUpdateSchedule()
+    {
+        Task.Run(Updater.CleanupOld);
+        // Первая проверка — через 20 с после запуска, затем раз в 6 часов
+        _updateTimer = new DispatcherTimer(TimeSpan.FromSeconds(20), DispatcherPriority.Background, async (_, _) =>
+        {
+            _updateTimer!.Interval = TimeSpan.FromHours(6);
+            if (Settings.AutoUpdate) await CheckForUpdatesAsync(manual: false);
+        }, _ui);
+    }
+
+    public async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (_updating) return;
+        try
+        {
+            SetUpdateStatus(Loc.T("U.Checking"));
+            AvailableUpdate = await Updater.CheckAsync();
+            Settings.LastUpdateCheck = DateTime.Now;
+            _settingsSaveTimer.Stop();
+            _settingsSaveTimer.Start();
+            if (AvailableUpdate is null)
+            {
+                SetUpdateStatus(Loc.F("U.Latest", Updater.Current.ToString(3)));
+                return;
+            }
+            SetUpdateStatus(Loc.F("U.Available", AvailableUpdate.Version.ToString(3)));
+            if (!manual && Settings.AutoUpdate && Updater.CanSelfUpdate) await InstallUpdateAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Проверка обновлений", ex);
+            SetUpdateStatus(manual ? Loc.F("U.Failed", ex.Message) : "");
+        }
+    }
+
+    public async Task InstallUpdateAsync()
+    {
+        if (AvailableUpdate is not { } release || _updating) return;
+        _updating = true;
+        try
+        {
+            SaveDictionary(true);
+            SaveSettingsNow();
+            var progress = new Progress<double>(p => SetUpdateStatus(Loc.F("U.Downloading", p), p));
+            await Updater.InstallAsync(release, progress);
+            SetUpdateStatus(Loc.T("U.Installing"), 1);
+            Exit(); // новая версия уже запущена и ждёт освобождения мьютекса
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Установка обновления", ex);
+            SetUpdateStatus(Loc.F("U.Failed", ex.Message));
+        }
+        finally { _updating = false; }
+    }
+
+    public void NotifyUpdated(string version) =>
+        _tray?.ShowBalloon("Type9", Loc.F("U.Updated", version));
 
     // ------------------------------------------------------------------ подсказки
 
     private PredictionOptions Options => new(Settings.MinPrefix, Settings.MaxSuggestions, Settings.AddSpaceAfterWord,
-        Settings.NextWordPrediction, Settings.NextWordMinCount);
+        Settings.NextWordPrediction, Settings.NextWordMinCount, Settings.SuggestLanguage);
 
     public void OnContextChanged(int version, TypingContext ctx)
     {
@@ -237,6 +363,7 @@ internal sealed class AppController : IInputSink, IDisposable
         ThemeManager.Apply(Settings.Theme, Settings.Accent);
         if (Loc.Current != Settings.Language) Loc.Apply(Settings.Language);
         UiScale.Apply(Settings.UiScale);
+        EnsureLanguageModels();
         _tray?.Update();
         _settingsSaveTimer.Stop();
         _settingsSaveTimer.Start();
@@ -304,11 +431,7 @@ internal sealed class AppController : IInputSink, IDisposable
         if (_settingsWindow is null)
         {
             _settingsWindow = new SettingsWindow(this);
-            _settingsWindow.Closed += (_, _) =>
-            {
-                _settingsWindow = null;
-                _ui.BeginInvoke(TrimMemory, DispatcherPriority.ApplicationIdle);
-            };
+            _settingsWindow.Closed += (_, _) => _settingsWindow = null;
             _settingsWindow.Show();
         }
         if (_settingsWindow.WindowState == WindowState.Minimized) _settingsWindow.WindowState = WindowState.Normal;
@@ -318,15 +441,25 @@ internal sealed class AppController : IInputSink, IDisposable
 
     public void Exit() => Application.Current.Shutdown();
 
-    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
-    private static extern bool SetProcessWorkingSetSize(IntPtr process, IntPtr min, IntPtr max);
+    /// <summary>
+    /// Убирает временный мусор после загрузки модели или выгрузки языка. Рабочий набор принудительно
+    /// не урезается: иначе первое нажатие после простоя подтягивало бы страницы с диска (приоритет — скорость).
+    /// </summary>
+    public static void TrimMemory() => GC.Collect(2, GCCollectionMode.Optimized, blocking: false);
 
-    /// <summary>Резидентная программа большую часть времени ждёт: отдаём системе память после загрузки и закрытия окон.</summary>
-    public static void TrimMemory()
+    /// <summary>Прогрев: один пробный расчёт подсказок, чтобы первое реальное нажатие не ждало JIT/кеш.</summary>
+    private void WarmUp()
     {
-        GC.Collect(2, GCCollectionMode.Forced, true, true);
-        GC.WaitForPendingFinalizers();
-        SetProcessWorkingSetSize(System.Diagnostics.Process.GetCurrentProcess().Handle, -1, -1);
+        try
+        {
+            foreach (var text in new[] { "добрый д", "в этом мес", "спасибо за ", "hello wor" })
+            {
+                var t = new TypingTracker();
+                foreach (var ch in text) t.Feed(ch);
+                Prediction.Predict(t.GetContext(), Options with { MinPrefix = 0 });
+            }
+        }
+        catch (Exception ex) { Log.Error("Прогрев", ex); }
     }
 
     public void Dispose()

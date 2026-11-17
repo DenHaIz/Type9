@@ -1,6 +1,6 @@
 name: release
 
-# Пуш тега вида v0.1 собирает оба варианта exe, прогоняет тесты и публикует GitHub Release.
+# Пуш тега вида v0.2 прогоняет тесты, собирает Type9.exe и публикует GitHub Release.
 on:
   push:
     tags: ['v*']
@@ -22,9 +22,15 @@ jobs:
       - name: Tests
         run: dotnet test Type9.sln -c Release -nologo
 
-      - name: Publish single-file exe
+      - name: Publish Type9.exe
         shell: pwsh
         run: ./build/build.ps1
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -Filter *.exe | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name } |
+            Set-Content dist/SHA256SUMS.txt -Encoding ascii
 
       - name: GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -32,5 +38,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ github.ref_name }}" dist/Type9.exe dist/Type9-lite.exe `
+          gh release create "${{ github.ref_name }}" dist/Type9.exe dist/SHA256SUMS.txt `
             --title "Type9 ${{ github.ref_name }}" --notes-file docs/RELEASE_NOTES.md

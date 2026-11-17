@@ -79,6 +79,9 @@ internal sealed class TrayIcon : IDisposable
         menu.IsOpen = true;
     }
 
+    public void ShowBalloon(string title, string text) =>
+        _icon.ShowBalloonTip(4000, title, text, Forms.ToolTipIcon.Info);
+
     public void Dispose()
     {
         _icon.Visible = false;

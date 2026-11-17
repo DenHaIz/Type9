@@ -5,6 +5,7 @@ public enum RunMode { Normal, Elevated }
 public enum RadialTrigger { Hold, Toggle }
 public enum InsertMethod { Auto, Typing, Clipboard }
 public enum PopupPlacement { Caret, Fixed }
+public enum SuggestLanguage { Russian, English, Both }
 
 public sealed class AppSettings
 {
@@ -22,7 +23,9 @@ public sealed class AppSettings
 
     // Подсказки
     public bool SuggestionsEnabled { get; set; } = true;
+    /// <summary>С какой буквы подсказывать; 0 — сразу после пробела (следующее слово по смыслу).</summary>
     public int MinPrefix { get; set; } = 2;
+    public SuggestLanguage SuggestLanguage { get; set; } = SuggestLanguage.Russian;
     public int MaxSuggestions { get; set; } = 3;
     public bool AddSpaceAfterWord { get; set; } = true;
     public bool SmartPunctuation { get; set; } = true;
@@ -41,6 +44,11 @@ public sealed class AppSettings
     public bool NewlineAsShiftEnter { get; set; } = true;
     public InsertMethod InsertMethod { get; set; } = InsertMethod.Auto;
     public int ClipboardThreshold { get; set; } = 200;
+
+    // Обновления
+    public bool AutoUpdate { get; set; } = true;
+    public DateTime LastUpdateCheck { get; set; }
+    public string? SkippedVersion { get; set; }
 
     public List<string> ExcludedProcesses { get; set; } =
         ["KeePass", "KeePassXC", "1Password", "Bitwarden", "LastPass"];

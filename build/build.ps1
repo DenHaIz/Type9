@@ -1,11 +1,7 @@
-# Сборка Type9 в один исполняемый файл.
-#   .\build\build.ps1            — оба варианта
-#   .\build\build.ps1 -Variant full
-# Результат: dist\Type9.exe (самодостаточный, .NET не нужен) и dist\Type9-lite.exe (нужен .NET Desktop Runtime 10).
-param(
-    [ValidateSet('all', 'full', 'lite')] [string] $Variant = 'all',
-    [string] $Configuration = 'Release'
-)
+# Сборка Type9 в один самодостаточный исполняемый файл (установленный .NET не нужен).
+#   .\build\build.ps1
+# Результат: dist\Type9.exe
+param([string] $Configuration = 'Release')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $proj = Join-Path $root 'src\Type9\Type9.csproj'
@@ -20,19 +16,13 @@ if (-not (Test-Path $ico)) {
     Start-Process $exe -ArgumentList "--export-icon `"$ico`"" -Wait
 }
 
-$common = @('-c', $Configuration, '-r', 'win-x64', '-nologo', '-p:PublishSingleFile=true', '-p:DebugType=none', '-p:GenerateDocumentationFile=false')
+$out = Join-Path $root 'artifacts\full'
+# ReadyToRun — заранее скомпилированный код: быстрый старт и мгновенная первая подсказка без JIT.
+# Без EnableCompressionInSingleFile: файл крупнее, но сборки отображаются в память, а не распаковываются.
+dotnet publish $proj -c $Configuration -r win-x64 -nologo --self-contained true `
+    -p:PublishSingleFile=true -p:PublishReadyToRun=true -p:IncludeNativeLibrariesForSelfExtract=true `
+    -p:DebugType=none -p:GenerateDocumentationFile=false -o $out
+if ($LASTEXITCODE -ne 0) { throw "dotnet publish завершился с кодом $LASTEXITCODE" }
+Copy-Item (Join-Path $out 'Type9.exe') (Join-Path $dist 'Type9.exe') -Force
 
-if ($Variant -in 'all', 'full') {
-    $out = Join-Path $root 'artifacts\full'
-    # Без EnableCompressionInSingleFile: файл крупнее (~150 МБ), но сборки отображаются в память, а не
-    # распаковываются — резидентная программа держит ~20 МБ вместо ~125 МБ.
-    dotnet publish $proj @common --self-contained true -p:IncludeNativeLibrariesForSelfExtract=true -o $out
-    Copy-Item (Join-Path $out 'Type9.exe') (Join-Path $dist 'Type9.exe') -Force
-}
-if ($Variant -in 'all', 'lite') {
-    $out = Join-Path $root 'artifacts\lite'
-    dotnet publish $proj @common --self-contained false -o $out
-    Copy-Item (Join-Path $out 'Type9.exe') (Join-Path $dist 'Type9-lite.exe') -Force
-}
-
-Get-ChildItem $dist -Filter *.exe | ForEach-Object { '{0,-16} {1,8:N1} MB' -f $_.Name, ($_.Length / 1MB) }
+Get-ChildItem $dist -Filter *.exe | ForEach-Object { '{0,-12} {1,8:N1} MB' -f $_.Name, ($_.Length / 1MB) }

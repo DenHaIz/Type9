@@ -16,6 +16,8 @@ public partial class App : Application
     {
         base.OnStartup(e);
         var args = e.Args;
+        // Приоритет — отзывчивость: без длительных блокирующих сборок мусора во время набора
+        System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.SustainedLowLatency;
 
         DispatcherUnhandledException += (_, ex) =>
         {
@@ -102,6 +104,11 @@ public partial class App : Application
         else if (!args.Contains("--autostart") && !restarted)
         {
             _controller.ShowSettings();
+        }
+        else if (Array.IndexOf(args, "--updated") is var upd and >= 0)
+        {
+            // Обновились в фоне — не мешаем, только сообщаем
+            _controller.NotifyUpdated(args.Length > upd + 1 ? args[upd + 1] : Updater.Current.ToString(3));
         }
         else if (restarted)
         {

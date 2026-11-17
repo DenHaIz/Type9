@@ -50,6 +50,7 @@ internal sealed class SuggestionPopup : Window
         {
             CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1),
             Effect = new DropShadowEffect { BlurRadius = 18, ShadowDepth = 3, Opacity = 0.35, Color = Colors.Black },
+            CacheMode = new BitmapCache(), // тень не пересчитывается при анимации появления
         };
         shadow.SetResourceReference(Border.BackgroundProperty, "B.Surface");
         shadow.SetResourceReference(Border.BorderBrushProperty, "B.Line");
@@ -136,7 +137,13 @@ internal sealed class SuggestionPopup : Window
         row.Children.Add(tag);
 
         row.MouseLeftButtonDown += (_, e) => { e.Handled = true; ItemClicked?.Invoke(index); };
-        row.MouseEnter += (_, _) => { if (_visible) Select(index); };
+        // Наведение — только лёгкая подсветка; выбранный для Tab вариант меняют лишь ↑/↓ (иначе UI и Tab расходятся)
+        var hover = new Border { CornerRadius = new CornerRadius(7), Opacity = 0, IsHitTestVisible = false };
+        hover.SetResourceReference(Border.BackgroundProperty, "B.Hover");
+        Grid.SetColumnSpan(hover, 2);
+        row.Children.Insert(0, hover);
+        row.MouseEnter += (_, _) => hover.Animate(OpacityProperty, 1, Motion.Fast, Motion.EaseOut);
+        row.MouseLeave += (_, _) => hover.Animate(OpacityProperty, 0, Motion.Normal, Motion.EaseOut);
         return row;
     }
 

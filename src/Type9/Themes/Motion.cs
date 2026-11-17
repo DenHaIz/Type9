@@ -1,14 +1,17 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media.Animation;
 
 namespace Type9.Themes;
 
-/// <summary>Единые длительности и кривые анимаций. Все анимации — по Opacity/трансформациям (GPU, без relayout).</summary>
+/// <summary>
+/// Единые длительности и кривые анимаций. Все анимации — по Opacity/трансформациям (GPU, без relayout).
+/// Длительности подобраны под 60 Гц: 7–15 кадров — заметно плавно, но не «вязко».
+/// </summary>
 internal static class Motion
 {
-    public static readonly Duration Fast = TimeSpan.FromMilliseconds(90);
-    public static readonly Duration Normal = TimeSpan.FromMilliseconds(140);
-    public static readonly Duration Slow = TimeSpan.FromMilliseconds(220);
+    public static readonly Duration Fast = TimeSpan.FromMilliseconds(110);
+    public static readonly Duration Normal = TimeSpan.FromMilliseconds(170);
+    public static readonly Duration Slow = TimeSpan.FromMilliseconds(250);
 
     public static readonly IEasingFunction EaseOut = Freeze(new CubicEase { EasingMode = EasingMode.EaseOut });
     public static readonly IEasingFunction EaseOutStrong = Freeze(new QuinticEase { EasingMode = EasingMode.EaseOut });

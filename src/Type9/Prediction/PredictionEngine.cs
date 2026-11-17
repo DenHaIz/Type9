@@ -1,4 +1,4 @@
-using Type9.Core;
+﻿using Type9.Core;
 using Type9.Input;
 
 namespace Type9.Prediction;
@@ -8,16 +8,51 @@ public sealed record PredictionOptions(
     int MaxResults = 3,
     bool AddSpace = true,
     bool NextWord = true,
-    int NextWordMinCount = 2);
+    int NextWordMinCount = 2,
+    SuggestLanguage Language = SuggestLanguage.Russian);
 
-/// <summary>Ранжирует варианты: базовый словарь + выученные слова + контекст (n-граммы) + сокращения.</summary>
+/// <summary>
+/// Ранжирование вариантов. Оценка слова — смесь вероятностей:
+///   контекст пользователя (его триграммы/биграммы) ×2, контекст корпуса ×1,
+///   частота слова (корпус + личный словарь) с поправкой на согласование окончаний с предыдущим словом.
+/// Личные слова получают бонус за недавнее использование, длинные дополнения — небольшой бонус за экономию нажатий.
+/// </summary>
 public sealed class PredictionEngine
 {
-    private const double WBase = 1.0, WUser = 0.9, WBigram = 1.1, WTrigram = 1.6, WRecency = 0.35;
+    private const double WUserCtx = 2.0, WBaseCtx = 1.0, WBaseUni = 1.0, WUserUni = 0.35, WExtraUni = 0.0005;
+    private const int UnigramShortlist = 400;
 
-    public BaseDictionary Base { get; set; } = BaseDictionary.Empty;
+    public LanguageModel? Russian { get; set; }
+    public LanguageModel? English { get; set; }
+    public BaseDictionary Extra { get; set; } = BaseDictionary.Empty;
     public UserModel User { get; set; } = new();
     public IReadOnlyList<Abbreviation> Abbreviations { get; set; } = [];
+
+    private enum Script { Other, Cyrillic, Latin }
+
+    private static Script ScriptOf(string w)
+    {
+        foreach (var c in w)
+        {
+            if (c is >= 'Ѐ' and <= 'ӿ') return Script.Cyrillic;
+            if (c is >= 'a' and <= 'z' or >= 'A' and <= 'Z') return Script.Latin;
+        }
+        return Script.Other;
+    }
+
+    private static bool Allowed(Script s, SuggestLanguage lang) => lang switch
+    {
+        SuggestLanguage.Russian => s == Script.Cyrillic,
+        SuggestLanguage.English => s == Script.Latin,
+        _ => s is Script.Cyrillic or Script.Latin,
+    };
+
+    private LanguageModel? ModelFor(Script s) => s switch
+    {
+        Script.Cyrillic => Russian,
+        Script.Latin => English,
+        _ => null,
+    };
 
     public IReadOnlyList<Suggestion> Predict(TypingContext ctx, PredictionOptions o)
     {
@@ -33,49 +68,134 @@ public sealed class PredictionEngine
                     result.Add(new Suggestion(SuggestionKind.Abbreviation, ctx.Word + " → ", OneLine(a.Text), Placeholders.Expand(a.Text), ctx.Word.Length));
             }
 
-            if (ctx.Word.Length >= o.MinPrefix)
-                result.AddRange(Completions(ctx, o, space).Take(Math.Max(0, o.MaxResults - result.Count)));
+            var script = ScriptOf(ctx.Word);
+            if (ctx.Word.Length >= Math.Max(1, o.MinPrefix) && Allowed(script, o.Language))
+                result.AddRange(Completions(ctx, ModelFor(script), o, space).Take(Math.Max(0, o.MaxResults - result.Count)));
         }
-        else if (o.NextWord && ctx.Prev1 is not null)
+        else if (ctx.Prev1 is not null && (o.MinPrefix == 0 || o.NextWord))
         {
-            result.AddRange(NextWords(ctx, o, space));
+            var script = ScriptOf(ctx.Prev1);
+            if (Allowed(script, o.Language))
+                result.AddRange(NextWords(ctx, o.MinPrefix == 0 ? ModelFor(script) : null, o, space));
         }
 
         return result.Count > o.MaxResults ? result.GetRange(0, o.MaxResults) : result;
     }
 
-    private IEnumerable<Suggestion> Completions(TypingContext ctx, PredictionOptions o, string space)
+    // ------------------------------------------------------------------ дополнение слова
+
+    private sealed class Candidate
+    {
+        public string Form = "";
+        public double BaseUni, UserUni, BaseCtx, UserCtx;
+    }
+
+    private IEnumerable<Suggestion> Completions(TypingContext ctx, LanguageModel? model, PredictionOptions o, string space)
     {
         var prefix = CaseHelper.Normalize(ctx.Word);
         var p1 = ctx.Prev1 is null ? null : CaseHelper.Normalize(ctx.Prev1);
         var p2 = ctx.Prev2 is null ? null : CaseHelper.Normalize(ctx.Prev2);
-        long now = UserModel.NowMinutes();
+        var cands = new Dictionary<string, Candidate>(StringComparer.Ordinal);
+        var script = ScriptOf(ctx.Word);
 
-        var scored = new Dictionary<string, (string Form, double Score)>(StringComparer.Ordinal);
-
-        foreach (var (key, form, score) in Base.ByPrefix(prefix))
+        Candidate Get(string key, string form)
         {
-            if (key.Length <= prefix.Length) continue;
-            scored[key] = (form, WBase * score);
+            if (!cands.TryGetValue(key, out var c)) cands[key] = c = new Candidate { Form = form };
+            return c;
         }
 
+        if (model is not null)
+        {
+            var (from, to) = model.PrefixRange(prefix);
+            int i1 = p1 is null ? -1 : model.Find(p1);
+            int i2 = p2 is null ? -1 : model.Find(p2);
+
+            // Контекст корпуса: продолжения предыдущих слов, подходящие под префикс
+            if (i1 >= 0)
+            {
+                double tot1 = Math.Max(1, model.ContextTotal(i1));
+                foreach (var (id, cnt) in model.Followers(i1))
+                    if (id >= from && id < to && model.KeySpan(id).Length > prefix.Length)
+                        Get(model.Key(id), model.Form(id)).BaseCtx += 0.35 * cnt / tot1;
+                if (i2 >= 0)
+                {
+                    double tot2 = Math.Max(1, model.Bigram(i2, i1));
+                    foreach (var (id, cnt) in model.Followers(i2, i1))
+                        if (id >= from && id < to)
+                            Get(model.Key(id), model.Form(id)).BaseCtx += 0.65 * cnt / tot2;
+                }
+            }
+
+            // Самые частые слова с этим префиксом (короткий список, чтобы не перебирать тысячи)
+            foreach (var id in TopByUnigram(model, from, to, prefix.Length))
+                Get(model.Key(id), model.Form(id));
+            foreach (var (key, c) in cands)
+            {
+                int id = model.Find(key);
+                if (id >= 0) c.BaseUni = model.Unigram(id);
+            }
+        }
+
+        foreach (var (key, form, score) in Extra.ByPrefix(prefix))
+            if (key.Length > prefix.Length && ScriptOf(key) == script)
+                Get(key, form).BaseUni += WExtraUni * score;
+
+        // Личный словарь
+        long now = UserModel.NowMinutes();
+        double userTotal = User.TotalCount + 200;
+        double u1 = p1 is null ? 0 : User.ContextTotal(p1);
+        double u2 = p1 is null || p2 is null ? 0 : User.ContextTotal(p2, p1);
         foreach (var (key, st) in User.ByPrefix(prefix))
         {
-            if (key.Length <= prefix.Length) continue;
-            double s = scored.TryGetValue(key, out var b) ? b.Score : 0;
-            s += WUser * Math.Log(1 + st.Count);
-            double ageDays = (now - st.LastUsed) / 1440.0;
-            if (ageDays < 14) s += WRecency * (1 - ageDays / 14);
-            s += WBigram * Math.Log(1 + User.Bigram(p1, key));
-            s += WTrigram * Math.Log(1 + User.Trigram(p2, p1, key));
-            scored[key] = (st.Form, s);
+            if (key.Length <= prefix.Length || ScriptOf(key) != script) continue;
+            var c = Get(key, st.Form);
+            c.Form = st.Form;
+            double rec = Recency(now, st.LastUsed);
+            c.UserUni = st.Count / userTotal * rec;
+            if (u1 > 0) c.UserCtx += 0.35 * User.Bigram(p1, key) / u1 * rec;
+            if (u2 > 0) c.UserCtx += 0.65 * User.Trigram(p2, p1, key) / u2 * rec;
         }
 
-        return scored
-            .OrderByDescending(kv => kv.Value.Score)
-            .ThenBy(kv => kv.Key.Length)
+        double liftPow = model?.Language == "ru" ? 0.8 : 0.4;
+        return cands
+            .Select(kv =>
+            {
+                var c = kv.Value;
+                double lift = p1 is not null && model is not null ? model.SuffixLift(p1, kv.Key) : 1;
+                double score = (WUserCtx * c.UserCtx + WBaseCtx * c.BaseCtx) * Math.Pow(lift, liftPow * 0.4)
+                             + (WBaseUni * c.BaseUni + WUserUni * c.UserUni) * Math.Pow(lift, liftPow);
+                score *= 1 + 0.03 * Math.Min(kv.Key.Length - prefix.Length, 8);
+                return (kv.Key, c.Form, Score: score);
+            })
+            .Where(x => x.Score > 0 && x.Key.Length > prefix.Length)
+            .OrderByDescending(x => x.Score)
+            .ThenBy(x => x.Key.Length)
             .Take(o.MaxResults)
-            .Select(kv => MakeCompletion(ctx.Word, kv.Value.Form, space));
+            .Select(x => MakeCompletion(ctx.Word, x.Form, space));
+    }
+
+    private static IEnumerable<int> TopByUnigram(LanguageModel model, int from, int to, int prefixLen)
+    {
+        if (to - from <= UnigramShortlist)
+        {
+            for (int i = from; i < to; i++)
+                if (model.KeySpan(i).Length > prefixLen) yield return i;
+            yield break;
+        }
+        var heap = new PriorityQueue<int, float>(UnigramShortlist + 1);
+        for (int i = from; i < to; i++)
+        {
+            if (model.KeySpan(i).Length <= prefixLen) continue;
+            heap.Enqueue(i, model.Unigram(i));
+            if (heap.Count > UnigramShortlist) heap.Dequeue();
+        }
+        while (heap.Count > 0) yield return heap.Dequeue();
+    }
+
+    private static double Recency(long now, long last)
+    {
+        double days = (now - last) / 1440.0;
+        return days < 30 ? 1 + 0.5 * (1 - days / 30) : 1;
     }
 
     internal static Suggestion MakeCompletion(string typed, string form, string space)
@@ -88,25 +208,62 @@ public sealed class PredictionEngine
             applied[Math.Min(typed.Length, applied.Length)..], applied + space, typed.Length);
     }
 
-    private IEnumerable<Suggestion> NextWords(TypingContext ctx, PredictionOptions o, string space)
+    // ------------------------------------------------------------------ следующее слово
+
+    private IEnumerable<Suggestion> NextWords(TypingContext ctx, LanguageModel? model, PredictionOptions o, string space)
     {
         var p1 = CaseHelper.Normalize(ctx.Prev1!);
         var p2 = ctx.Prev2 is null ? null : CaseHelper.Normalize(ctx.Prev2);
+        var script = ScriptOf(ctx.Prev1!);
+        var scores = new Dictionary<string, (string Form, double Score)>(StringComparer.Ordinal);
 
-        var scores = new Dictionary<string, double>(StringComparer.Ordinal);
-        foreach (var (k, c) in User.Followers(p1))
-            if (c >= o.NextWordMinCount) scores[k] = WBigram * Math.Log(1 + c);
+        void Add(string key, string form, double s)
+        {
+            if (key.Length < 3 || key == p1 || ScriptOf(key) != script) return; // короткие слова быстрее напечатать
+            scores[key] = scores.TryGetValue(key, out var cur) ? (cur.Form, cur.Score + s) : (form, s);
+        }
+
+        // Корпус (только в режиме «подсказывать после пробела»)
+        if (model is not null)
+        {
+            int i1 = model.Find(p1);
+            if (i1 >= 0)
+            {
+                double tot1 = Math.Max(1, model.ContextTotal(i1));
+                foreach (var (id, cnt) in model.Followers(i1))
+                    Add(model.Key(id), model.Form(id), WBaseCtx * 0.35 * cnt / tot1);
+                int i2 = p2 is null ? -1 : model.Find(p2);
+                if (i2 >= 0)
+                {
+                    double tot2 = Math.Max(1, model.Bigram(i2, i1));
+                    foreach (var (id, cnt) in model.Followers(i2, i1))
+                        Add(model.Key(id), model.Form(id), WBaseCtx * 0.65 * cnt / tot2);
+                }
+            }
+        }
+
+        // Личные привычки: в обычном режиме — только устойчивые (повторённые) продолжения
+        int minCount = model is null ? o.NextWordMinCount : 1;
+        long now = UserModel.NowMinutes();
+        double u1 = User.ContextTotal(p1);
+        if (u1 > 0)
+            foreach (var (k, c) in User.Followers(p1))
+                if (c >= minCount) Add(k, User.Get(k)?.Form ?? k, WUserCtx * 0.35 * c / u1 * Recency(now, User.Get(k)?.LastUsed ?? 0));
         if (p2 is not null)
-            foreach (var (k, c) in User.Followers(p2, p1))
-                if (c >= o.NextWordMinCount) scores[k] = scores.GetValueOrDefault(k) + WTrigram * Math.Log(1 + c);
+        {
+            double u2 = User.ContextTotal(p2, p1);
+            if (u2 > 0)
+                foreach (var (k, c) in User.Followers(p2, p1))
+                    if (c >= minCount) Add(k, User.Get(k)?.Form ?? k, WUserCtx * 0.65 * c / u2 * Recency(now, User.Get(k)?.LastUsed ?? 0));
+        }
 
         string lead = ctx.NeedsLeadingSpace ? " " : "";
         return scores
-            .OrderByDescending(kv => kv.Value)
+            .OrderByDescending(kv => kv.Value.Score)
             .Take(o.MaxResults)
             .Select(kv =>
             {
-                var form = User.Get(kv.Key)?.Form ?? kv.Key;
+                var form = kv.Value.Form;
                 return new Suggestion(SuggestionKind.NextWord, "", form, lead + form + space, 0);
             });
     }

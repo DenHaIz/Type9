@@ -1,4 +1,4 @@
-using Type9.Core;
+﻿using Type9.Core;
 using Type9.Input;
 using Type9.Prediction;
 using Type9.UI;
@@ -102,7 +102,7 @@ public class PredictionTests
     {
         var e = new PredictionEngine
         {
-            Base = BaseDictionary.Build([["здравствуйте", "здание", "здоровье", "добрый", "день"]]),
+            Extra = BaseDictionary.Build([["здравствуйте", "здание", "здоровье", "добрый", "день"]]),
         };
         e.User.Train("Добрый день, коллеги. Добрый день, коллеги. Добрый день, коллеги.");
         return e;

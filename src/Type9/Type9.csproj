@@ -11,13 +11,14 @@
     <AssemblyName>Type9</AssemblyName>
     <RootNamespace>Type9</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Product>Type9</Product>
     <Description>Автодополнение и круговое меню фраз для Windows</Description>
     <SatelliteResourceLanguages>en;ru</SatelliteResourceLanguages>
     <InvariantGlobalization>false</InvariantGlobalization>
     <TieredPGO>true</TieredPGO>
-    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <TieredCompilationQuickJitForLoops>true</TieredCompilationQuickJitForLoops>
     <Authors>denhaiz</Authors>
     <Company>denhaiz</Company>
     <Copyright>© denhaiz</Copyright>
@@ -37,7 +38,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Resources\Dict\*.txt" />
+    <EmbeddedResource Include="Resources\Dict\*.t9lm" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Приоритет — отзывчивость: GC держит память под рукой, без лишних уплотнений -->
+    <RuntimeHostConfigurationOption Include="System.GC.RetainVM" Value="true" />
   </ItemGroup>
 
   <ItemGroup>

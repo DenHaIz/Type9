@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using Type9.Input;
 
@@ -24,6 +24,8 @@ public sealed class UserModel
 
     public bool Dirty { get; set; }
     public int WordCount => _words.Count;
+    /// <summary>Сумма употреблений всех слов (знаменатель для частоты).</summary>
+    public long TotalCount { get; private set; }
     public int Version { get; private set; }
 
     public static long NowMinutes() => DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 60;
@@ -47,6 +49,7 @@ public sealed class UserModel
             st.Form = PickForm(w.Word, w.SentenceStart, st.Form);
         }
         st.Count++;
+        TotalCount++;
         st.LastUsed = now;
 
         if (w.Prev1 is { } p1 && IsLearnable(p1))
@@ -102,6 +105,12 @@ public sealed class UserModel
         p2Key is not null && p1Key is not null && _trigrams.TryGetValue(p2Key + " " + p1Key, out var m)
             ? m.GetValueOrDefault(key) : 0;
 
+    public double ContextTotal(string p1Key) =>
+        _bigrams.TryGetValue(p1Key, out var m) ? m.Values.Sum() : 0;
+
+    public double ContextTotal(string p2Key, string p1Key) =>
+        _trigrams.TryGetValue(p2Key + " " + p1Key, out var m) ? m.Values.Sum() : 0;
+
     public IEnumerable<KeyValuePair<string, int>> Followers(string p1Key) =>
         _bigrams.TryGetValue(p1Key, out var m) ? m : [];
 
@@ -114,7 +123,8 @@ public sealed class UserModel
     public void Remove(string word)
     {
         var key = CaseHelper.Normalize(word);
-        if (!_words.Remove(key)) return;
+        if (!_words.Remove(key, out var removed)) return;
+        TotalCount -= removed.Count;
         _index.Remove(key);
         _bigrams.Remove(key);
         foreach (var m in _bigrams.Values) m.Remove(key);
@@ -127,6 +137,7 @@ public sealed class UserModel
     public void Clear()
     {
         _words.Clear();
+        TotalCount = 0;
         _index.Clear();
         _bigrams.Clear();
         _trigrams.Clear();
@@ -193,6 +204,7 @@ public sealed class UserModel
                         _index.Add(p[1]);
                     }
                     st.Count += cnt;
+                    TotalCount += cnt;
                     st.LastUsed = Math.Max(st.LastUsed, last);
                     break;
                 case "B" when int.TryParse(p[3], CultureInfo.InvariantCulture, out var bc):

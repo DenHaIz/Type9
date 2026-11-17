@@ -66,6 +66,8 @@ internal sealed class RadialMenuWindow : Window
         _view.Build(book.Groups[_page], _page, book.Groups.Count);
         Win32.GetCursorPos(out _center);
 
+        // Сначала ставим окно под курсор, потом показываем — без кадра на старом месте
+        if (_hwnd != IntPtr.Zero) PlaceAtCursor();
         Show();
         PlaceAtCursor();
         _view.PlayOpen();
@@ -98,8 +100,7 @@ internal sealed class RadialMenuWindow : Window
     {
         if (!IsOpen || _book is null || _book.Groups.Count < 2) return;
         _page = (_page + delta + _book.Groups.Count) % _book.Groups.Count;
-        _view.Build(_book.Groups[_page], _page, _book.Groups.Count);
-        _view.PlayPage(delta);
+        _view.SwitchPage(_book.Groups[_page], _page, _book.Groups.Count, delta);
     }
 
     /// <summary>Закрывает меню и возвращает выбранную фразу (или null).</summary>

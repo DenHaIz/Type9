@@ -54,6 +54,7 @@ internal partial class SettingsWindow : Window
         _app.PhrasesChanged += RefreshPreview;
         _app.PausedChanged += UpdateStatus;
         _app.DictionaryChanged += RefreshWords;
+        _app.UpdateStateChanged += RefreshUpdate;
         ThemeManager.Changed += UpdateLogos;
         ThemeManager.Changing += CaptureForCrossfade;
         ThemeManager.Changed += Crossfade;
@@ -84,6 +85,7 @@ internal partial class SettingsWindow : Window
             _app.PhrasesChanged -= RefreshPreview;
             _app.PausedChanged -= UpdateStatus;
             _app.DictionaryChanged -= RefreshWords;
+            _app.UpdateStateChanged -= RefreshUpdate;
             ThemeManager.Changed -= UpdateLogos;
             ThemeManager.Changing -= CaptureForCrossfade;
             ThemeManager.Changed -= Crossfade;
@@ -247,11 +249,54 @@ internal partial class SettingsWindow : Window
         UpdateMode();
         RefreshWords();
         RefreshPreview();
+        RefreshUpdate();
+    }
+
+    // ------------------------------------------------------------------ обновления
+
+    private void RefreshUpdate()
+    {
+        var text = _app.UpdateStatus;
+        if (string.IsNullOrEmpty(text) && _app.Settings.LastUpdateCheck > DateTime.MinValue)
+            text = Loc.F("U.Latest", Updater.Current.ToString(3));
+        if (UpdateStatusText.Text != text)
+        {
+            UpdateStatusText.Text = text;
+            Anim.Play(UpdateStatusText, 3);
+        }
+        bool canInstall = _app.AvailableUpdate is not null && Updater.CanSelfUpdate && _app.UpdateProgress < 0;
+        if (canInstall && InstallUpdateButton.Visibility != Visibility.Visible)
+        {
+            InstallUpdateButton.Visibility = Visibility.Visible;
+            Anim.Play(InstallUpdateButton, 4);
+        }
+        else if (!canInstall) InstallUpdateButton.Visibility = Visibility.Collapsed;
+
+        if (_app.UpdateProgress >= 0)
+        {
+            UpdateProgressHost.Visibility = Visibility.Visible;
+            UpdateProgressScale.Animate(ScaleTransform.ScaleXProperty, _app.UpdateProgress, Motion.Normal, Motion.EaseOut);
+        }
+        else UpdateProgressHost.Visibility = Visibility.Collapsed;
+    }
+
+    private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        CheckUpdateButton.IsEnabled = false;
+        try { await _app.CheckForUpdatesAsync(manual: true); }
+        finally { CheckUpdateButton.IsEnabled = true; }
+    }
+
+    private async void InstallUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        InstallUpdateButton.IsEnabled = false;
+        try { await _app.InstallUpdateAsync(); }
+        finally { InstallUpdateButton.IsEnabled = true; }
     }
 
     private static string AccentDisplayName(string ruName) => Loc.Current == AppLanguage.Russian ? ruName : ruName switch
     {
-        "Бордовый" => "Burgundy", "Винный" => "Wine", "Рубиновый" => "Ruby", "Медный" => "Copper",
+        "Бордовый" => "Burgundy", "Винный" => "Wine", "Лиловый" => "Lilac", "Медный" => "Copper",
         "Сапфировый" => "Sapphire", "Изумрудный" => "Emerald", "Графит" => "Graphite", _ => ruName,
     };
 
@@ -424,6 +469,38 @@ internal partial class SettingsWindow : Window
         if (GroupList.ItemContainerGenerator.ContainerFromItem(g) is FrameworkElement fe) Anim.Play(fe, d * 6);
     }
 
+    private bool _resetArmed;
+
+    private void ResetPhrases_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_resetArmed)
+        {
+            _resetArmed = true;
+            ResetPhrasesButton.Content = Loc.T("P.ResetConfirm");
+            Anim.Pulse(ResetPhrasesButton);
+            var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+            t.Tick += (_, _) =>
+            {
+                t.Stop();
+                _resetArmed = false;
+                ResetPhrasesButton.SetResourceReference(ContentProperty, "S.P.Reset");
+                Anim.Pulse(ResetPhrasesButton);
+            };
+            t.Start();
+            return;
+        }
+        _resetArmed = false;
+        ResetPhrasesButton.SetResourceReference(ContentProperty, "S.P.Reset");
+        SecPhrases.Animate(OpacityProperty, 0, Motion.Normal, Motion.EaseIn, completed: (_, _) =>
+        {
+            _app.Phrases.ResetTo(PhraseBook.CreateDefault(_app.Settings.Language));
+            if (GroupList.Items.Count > 0) GroupList.SelectedIndex = 0;
+            RefreshPreview();
+            Anim.Play(SecPhrases, 10);
+            Preview.PlayOpen();
+        });
+    }
+
     private void AddPhrase_Click(object sender, RoutedEventArgs e)
     {
         if (SelectedGroup is not { } g || g.Phrases.Count >= PhraseGroup.MaxPhrases) return;
@@ -480,7 +557,7 @@ internal partial class SettingsWindow : Window
             .Select(w => new WordRow(w.Form, w.Count))
             .ToList();
         WordList.ItemsSource = rows;
-        DictStats.Text = Loc.F("D.Stats", user.WordCount, _app.Prediction.Base.Count);
+        DictStats.Text = Loc.F("D.Stats", user.WordCount, (_app.Prediction.Russian?.Count ?? 0) + (_app.Prediction.English?.Count ?? 0));
         if (_section == "dict") Anim.Pulse(WordList);
     }
 

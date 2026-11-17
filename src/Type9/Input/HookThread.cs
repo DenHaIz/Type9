@@ -1,4 +1,4 @@
-using Type9.Core;
+﻿using Type9.Core;
 using Type9.Native;
 
 namespace Type9.Input;
@@ -46,31 +46,51 @@ internal sealed class HookThread : IDisposable
     private void Run()
     {
         _threadId = Win32.GetCurrentThreadId();
-        var hMod = Win32.GetModuleHandle(null);
-        _kbHook = Win32.SetWindowsHookEx(Win32.WH_KEYBOARD_LL, _kbProc, hMod, 0);
-        _msHook = Win32.SetWindowsHookEx(Win32.WH_MOUSE_LL, _msProc, hMod, 0);
-        if (_kbHook == IntPtr.Zero || _msHook == IntPtr.Zero)
-            Log.Error($"Не удалось установить хуки ввода (код {System.Runtime.InteropServices.Marshal.GetLastWin32Error()})");
+        InstallHooks();
 
         const uint flags = Win32.WINEVENT_OUTOFCONTEXT | Win32.WINEVENT_SKIPOWNPROCESS;
         _evForeground = Win32.SetWinEventHook(Win32.EVENT_SYSTEM_FOREGROUND, Win32.EVENT_SYSTEM_FOREGROUND, IntPtr.Zero, _winEventProc, 0, 0, flags);
         _evFocus = Win32.SetWinEventHook(Win32.EVENT_OBJECT_FOCUS, Win32.EVENT_OBJECT_FOCUS, IntPtr.Zero, _winEventProc, 0, 0, flags);
         _started.Set();
 
+        // Сторож: Windows молча снимает LL-хук, если система однажды не дождалась ответа (нагрузка,
+        // блокировка сеанса). Раз в минуту простоя переустанавливаем хуки — это дёшево и надёжно.
+        var timer = Win32.SetTimer(IntPtr.Zero, UIntPtr.Zero, 60_000, IntPtr.Zero);
         while (Win32.GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
         {
+            if (msg.message == Win32.WM_TIMER && msg.hwnd == IntPtr.Zero)
+            {
+                if (Environment.TickCount64 - Interlocked.Read(ref _lastInput) > 60_000) InstallHooks();
+                continue;
+            }
             Win32.TranslateMessage(ref msg);
             Win32.DispatchMessage(ref msg);
         }
 
+        Win32.KillTimer(IntPtr.Zero, timer);
         Win32.UnhookWindowsHookEx(_kbHook);
         Win32.UnhookWindowsHookEx(_msHook);
         Win32.UnhookWinEvent(_evFocus);
         Win32.UnhookWinEvent(_evForeground);
     }
 
+    private long _lastInput = Environment.TickCount64;
+
+    private void InstallHooks()
+    {
+        var hMod = Win32.GetModuleHandle(null);
+        if (_kbHook != IntPtr.Zero) Win32.UnhookWindowsHookEx(_kbHook);
+        if (_msHook != IntPtr.Zero) Win32.UnhookWindowsHookEx(_msHook);
+        _kbHook = Win32.SetWindowsHookEx(Win32.WH_KEYBOARD_LL, _kbProc, hMod, 0);
+        _msHook = Win32.SetWindowsHookEx(Win32.WH_MOUSE_LL, _msProc, hMod, 0);
+        if (_kbHook == IntPtr.Zero || _msHook == IntPtr.Zero)
+            Log.Error($"Не удалось установить хуки ввода (код {System.Runtime.InteropServices.Marshal.GetLastWin32Error()})");
+        Interlocked.Exchange(ref _lastInput, Environment.TickCount64);
+    }
+
     private IntPtr KeyboardProc(int nCode, IntPtr wParam, IntPtr lParam)
     {
+        Interlocked.Exchange(ref _lastInput, Environment.TickCount64);
         if (nCode >= 0)
         {
             try

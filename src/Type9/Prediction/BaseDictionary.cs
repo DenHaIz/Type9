@@ -1,6 +1,5 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Compression;
-using System.Reflection;
 using Type9.Core;
 using Type9.Input;
 
@@ -8,7 +7,7 @@ namespace Type9.Prediction;
 
 /// <summary>
 /// Неизменяемый частотный словарь: отсортированный массив ключей + бинарный поиск по префиксу.
-/// Источники: встроенные ресурсы Resources/Dict/*.txt и файлы %AppData%\Type9\dict\*.txt(.gz).
+/// Источник: файлы %AppData%\Type9\dict\*.txt(.gz) (основной словарь — встроенная <see cref="LanguageModel"/>).
 /// Формат строки: «слово» или «слово частота»; строки идут по убыванию частоты.
 /// </summary>
 public sealed class BaseDictionary
@@ -69,16 +68,10 @@ public sealed class BaseDictionary
         return new BaseDictionary(keys, forms, scores);
     }
 
-    public static BaseDictionary LoadDefault()
+    /// <summary>Дополнительные списки слов пользователя: %AppData%\Type9\dict\*.txt(.gz).</summary>
+    public static BaseDictionary LoadExtras()
     {
         var sources = new List<IEnumerable<string>>();
-        var asm = Assembly.GetExecutingAssembly();
-        foreach (var name in asm.GetManifestResourceNames().Where(n => n.Contains(".Dict.", StringComparison.Ordinal)))
-        {
-            using var s = asm.GetManifestResourceStream(name)!;
-            sources.Add(ReadLines(s));
-        }
-
         try
         {
             if (Directory.Exists(Paths.DictDir))

@@ -31,10 +31,8 @@ public sealed class RadialView : Grid
         public required double Mid;
     }
 
-    private readonly Canvas _sectorLayer = new() { Width = ViewSize, Height = ViewSize };
-    private readonly Grid _content;
-    private readonly ScaleTransform _contentScale = new(1, 1);
-    private readonly RotateTransform _contentRotate = new(0);
+    private Canvas _sectorLayer;
+    private readonly Grid _content = new();
     private readonly TextBlock _title;
     private readonly TextBlock _preview;
     private readonly StackPanel _dots;
@@ -64,10 +62,11 @@ public sealed class RadialView : Grid
         disc.SetResourceReference(Shape.FillProperty, "B.Disc");
         disc.SetResourceReference(Shape.StrokeProperty, "B.Line");
         disc.StrokeThickness = 1;
+        // Тень считается один раз и хранится как текстура — анимации не пересчитывают размытие каждый кадр
+        disc.CacheMode = new BitmapCache { SnapsToDevicePixels = true };
         Children.Add(disc);
 
-        _content = new Grid { RenderTransformOrigin = new Point(0.5, 0.5) };
-        _content.RenderTransform = new TransformGroup { Children = { _contentScale, _contentRotate } };
+        _sectorLayer = NewLayer();
         _content.Children.Add(_sectorLayer);
         Children.Add(_content);
 
@@ -99,21 +98,34 @@ public sealed class RadialView : Grid
         MouseLeftButtonUp += (_, _) => { if (_selected >= 0) SectorClicked?.Invoke(_selected); };
     }
 
+    private static Canvas NewLayer() => new()
+    {
+        Width = ViewSize, Height = ViewSize, RenderTransformOrigin = new Point(0.5, 0.5),
+        RenderTransform = new TransformGroup { Children = { new ScaleTransform(1, 1), new RotateTransform(0) } },
+    };
+
     public void Build(PhraseGroup? group, int page, int pageCount)
     {
         _group = group;
         _selected = -1;
         _sectors.Clear();
-        _sectorLayer.Children.Clear();
+        _content.Children.Clear();
+        _sectorLayer = NewLayer();
+        _content.Children.Add(_sectorLayer);
 
         var phrases = group?.Phrases.Take(PhraseGroup.MaxPhrases).ToList() ?? [];
         int n = phrases.Count;
         for (int i = 0; i < n; i++)
             _sectors.Add(CreateSector(phrases[i], i, n));
+        UpdateCenter(group, page, pageCount, n);
+    }
 
+    private void UpdateCenter(PhraseGroup? group, int page, int pageCount, int n)
+    {
         _title.Text = group?.Name?.ToUpperInvariant() ?? "";
         _preview.Text = Loc.T(n == 0 ? "R.Empty" : "R.Hover");
         _preview.SetResourceReference(TextBlock.ForegroundProperty, "B.FgMuted");
+        _hubRing.SetResourceReference(Shape.StrokeProperty, "B.SectorLine");
 
         _dots.Children.Clear();
         if (pageCount > 1)
@@ -252,13 +264,64 @@ public sealed class RadialView : Grid
         this.Animate(OpacityProperty, 0, Motion.Fast, Motion.EaseIn, completed: (_, _) => done?.Invoke());
     }
 
-    /// <summary>Смена страницы (группы): лёгкий поворот и проявление.</summary>
+    /// <summary>
+    /// Смена страницы без мерцания: старая страница поворачивается и растворяется, новая одновременно
+    /// въезжает с другой стороны. Обе на время анимации кешируются как текстуры (ровно на 60 Гц).
+    /// </summary>
+    public void SwitchPage(PhraseGroup? group, int page, int pageCount, int direction)
+    {
+        var old = _sectorLayer;
+        var oldSelected = _selected;
+        _group = group;
+        _selected = -1;
+        _sectors.Clear();
+        _sectorLayer = NewLayer();
+        _content.Children.Add(_sectorLayer);
+
+        var phrases = group?.Phrases.Take(PhraseGroup.MaxPhrases).ToList() ?? [];
+        for (int i = 0; i < phrases.Count; i++) _sectors.Add(CreateSector(phrases[i], i, phrases.Count));
+        UpdateCenter(group, page, pageCount, phrases.Count);
+        Anim.Pulse(_title);
+
+        var dur = new Duration(TimeSpan.FromMilliseconds(260));
+        double dpi = VisualTreeHelper.GetDpi(this).DpiScaleX;
+
+        old.IsHitTestVisible = false;
+        old.CacheMode = new BitmapCache(dpi);
+        var (os, or) = Parts(old);
+        or.Animate(RotateTransform.AngleProperty, -direction * 32, dur, Motion.EaseOut);
+        os.Animate(ScaleTransform.ScaleXProperty, 0.9, dur, Motion.EaseOut);
+        os.Animate(ScaleTransform.ScaleYProperty, 0.9, dur, Motion.EaseOut);
+        old.Animate(OpacityProperty, 0, new Duration(TimeSpan.FromMilliseconds(180)), Motion.EaseOut,
+            completed: (_, _) => _content.Children.Remove(old));
+
+        var layer = _sectorLayer;
+        layer.CacheMode = new BitmapCache(dpi);
+        var (ns, nr) = Parts(layer);
+        nr.Animate(RotateTransform.AngleProperty, 0, dur, Motion.EaseOutStrong, direction * 32);
+        ns.Animate(ScaleTransform.ScaleXProperty, 1, dur, Motion.EaseOutStrong, 0.9);
+        ns.Animate(ScaleTransform.ScaleYProperty, 1, dur, Motion.EaseOutStrong, 0.9);
+        layer.Animate(OpacityProperty, 1, dur, Motion.EaseOut, 0, completed: (_, _) =>
+        {
+            if (layer == _sectorLayer) layer.CacheMode = null; // вернуть чёткий текст после анимации
+        });
+        _ = oldSelected;
+    }
+
+    private static (ScaleTransform, RotateTransform) Parts(Canvas layer)
+    {
+        var g = (TransformGroup)layer.RenderTransform;
+        return ((ScaleTransform)g.Children[0], (RotateTransform)g.Children[1]);
+    }
+
+    /// <summary>Совместимость с превью настроек: мягкое проявление текущей страницы.</summary>
     public void PlayPage(int direction)
     {
-        _contentRotate.Animate(RotateTransform.AngleProperty, 0, Motion.Slow, Motion.EaseOutStrong, direction * -24);
-        _content.Animate(OpacityProperty, 1, Motion.Normal, Motion.EaseOut, 0.2);
-        _contentScale.Animate(ScaleTransform.ScaleXProperty, 1, Motion.Slow, Motion.EaseOutStrong, 0.94);
-        _contentScale.Animate(ScaleTransform.ScaleYProperty, 1, Motion.Slow, Motion.EaseOutStrong, 0.94);
+        var (s, r) = Parts(_sectorLayer);
+        r.Animate(RotateTransform.AngleProperty, 0, Motion.Slow, Motion.EaseOutStrong, direction * -20);
+        _sectorLayer.Animate(OpacityProperty, 1, Motion.Normal, Motion.EaseOut, 0.2);
+        s.Animate(ScaleTransform.ScaleXProperty, 1, Motion.Slow, Motion.EaseOutStrong, 0.94);
+        s.Animate(ScaleTransform.ScaleYProperty, 1, Motion.Slow, Motion.EaseOutStrong, 0.94);
     }
 
     /// <summary>Индекс сектора по смещению от центра в DIP.</summary>
