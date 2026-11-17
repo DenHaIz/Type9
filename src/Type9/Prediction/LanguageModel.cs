@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Compression;
 using System.Reflection;
 using System.Text;
@@ -55,6 +55,8 @@ public sealed class LanguageModel
         var lang = br.ReadString();
         int n = br.ReadInt32();
         long total = br.ReadInt64();
+        // Идентификаторы слов упакованы по 20 бит — больше 2^20 слов модель не поддерживает
+        if (n <= 0 || n > (1 << Shift) || total <= 0) throw new InvalidDataException("Повреждённая модель: размер словаря");
 
         var sb = new StringBuilder(n * 9);
         var offsets = new int[n + 1];
@@ -68,29 +70,41 @@ public sealed class LanguageModel
         var uni = new float[n];
         for (int i = 0; i < n; i++) uni[i] = (float)(br.ReadInt64() / (double)total);
 
-        int formCount = br.ReadInt32();
+        int formCount = Count(br, n);
         var forms = new Dictionary<int, string>(formCount);
-        for (int i = 0; i < formCount; i++) forms[br.ReadInt32()] = br.ReadString();
+        for (int i = 0; i < formCount; i++)
+        {
+            int id = br.ReadInt32();
+            var f = br.ReadString();
+            if ((uint)id < (uint)n) forms[id] = f;
+        }
 
         var ctx = new float[n];
         for (int i = 0; i < n; i++) ctx[i] = br.ReadInt32();
 
-        int nb = br.ReadInt32();
+        static int Count(BinaryReader r, int max)
+        {
+            int v = r.ReadInt32();
+            if (v < 0 || v > max) throw new InvalidDataException("Повреждённая модель: счётчик вне диапазона");
+            return v;
+        }
+
+        int nb = Count(br, 50_000_000);
         var bk = new long[nb];
         for (int i = 0; i < nb; i++) bk[i] = br.ReadInt64();
         var bc = new ushort[nb];
         for (int i = 0; i < nb; i++) bc[i] = br.ReadUInt16();
 
-        int nt = br.ReadInt32();
+        int nt = Count(br, 50_000_000);
         var tk = new long[nt];
         for (int i = 0; i < nt; i++) tk[i] = br.ReadInt64();
         var tc = new ushort[nt];
         for (int i = 0; i < nt; i++) tc[i] = br.ReadUInt16();
 
-        int ncls = br.ReadInt32();
+        int ncls = Count(br, 1 << Shift);
         var classes = new Dictionary<string, int>(ncls, StringComparer.Ordinal);
         for (int i = 0; i < ncls; i++) classes[br.ReadString()] = i;
-        int nsuf = br.ReadInt32();
+        int nsuf = Count(br, 1 << Shift);
         var suffixes = new Dictionary<string, int>(nsuf, StringComparer.Ordinal);
         var sufCounts = new long[nsuf];
         for (int i = 0; i < nsuf; i++)
@@ -100,7 +114,7 @@ public sealed class LanguageModel
         }
         double sufTotal = Math.Max(1, sufCounts.Sum());
         var sufProb = sufCounts.Select(c => (float)(c / sufTotal)).ToArray();
-        int ne = br.ReadInt32();
+        int ne = Count(br, 50_000_000);
         var sk = new long[ne];
         var sc = new int[ne];
         var classTotal = new float[ncls];
@@ -108,7 +122,10 @@ public sealed class LanguageModel
         {
             sk[i] = br.ReadInt64();
             sc[i] = br.ReadInt32();
-            classTotal[(int)(sk[i] >> Shift)] += sc[i];
+            int cls = (int)(sk[i] >> Shift);
+            if ((uint)cls >= (uint)ncls || (sk[i] & Mask) >= nsuf || (i > 0 && sk[i] < sk[i - 1]))
+                throw new InvalidDataException("Повреждённая модель: таблица окончаний");
+            classTotal[cls] += sc[i];
         }
 
         return new LanguageModel

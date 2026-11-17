@@ -217,6 +217,12 @@ internal static class Win32
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 
+    [DllImport("shcore.dll")]
+    public static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int x, int y);
+
     [DllImport("user32.dll")]
     public static extern IntPtr GetShellWindow();
 
@@ -230,6 +236,16 @@ internal static class Win32
         var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
         GetMonitorInfo(MonitorFromPoint(new POINT(x, y), MONITOR_DEFAULTTONEAREST), ref mi);
         return mi;
+    }
+
+    /// <summary>Монитор под точкой: рабочая область и DPI (без пересчёта в DIP).</summary>
+    public static (RECT Work, double Scale) MonitorAt(int x, int y)
+    {
+        var hmon = MonitorFromPoint(new POINT(x, y), MONITOR_DEFAULTTONEAREST);
+        var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        GetMonitorInfo(hmon, ref mi);
+        double scale = GetDpiForMonitor(hmon, 0, out var dx, out _) == 0 && dx > 0 ? dx / 96.0 : 1.0;
+        return (mi.rcWork, scale);
     }
 
     public static string GetClassName(IntPtr hwnd)

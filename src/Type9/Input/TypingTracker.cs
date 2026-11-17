@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 namespace Type9.Input;
 
@@ -10,7 +10,8 @@ public readonly record struct TypingContext(string Word, string? Prev1, string? 
 }
 
 /// <summary>Слово, завершённое вводом разделителя (пробел, знак препинания, Enter).</summary>
-public readonly record struct CompletedWord(string Word, string? Prev1, string? Prev2, bool SentenceStart);
+/// <param name="Learnable">false — часть адреса/почты/пути или смесь алфавитов: такое не запоминаем.</param>
+public readonly record struct CompletedWord(string Word, string? Prev1, string? Prev2, bool SentenceStart, bool Learnable = true);
 
 /// <summary>
 /// Держит хвост набранного текста с момента последнего сброса (клик, навигация, смена окна)
@@ -22,6 +23,9 @@ public sealed class TypingTracker
     private readonly StringBuilder _tail = new();
 
     public string Tail => _tail.ToString();
+
+    /// <summary>Абсолютная позиция набора (растёт при вводе, уменьшается при Backspace) — для отложенного обучения.</summary>
+    public long Position { get; private set; }
 
     public void Reset() => _tail.Clear();
 
@@ -42,17 +46,39 @@ public sealed class TypingTracker
             var ctx = GetContext();
             var word = ctx.Word.TrimEnd('-', '\'', '’');
             if (word.Length > 0)
-                completed = new CompletedWord(word, ctx.Prev1, ctx.Prev2, ctx.Prev1 is null && IsAtSentenceStart(ctx.Word.Length));
+            {
+                int start = _tail.Length - ctx.Word.Length;
+                char before = start > 0 ? _tail[start - 1] : ' ';
+                bool learnable = !IsAddressChar(before) && before != '.' && !IsAddressChar(c) && !MixedScripts(word);
+                completed = new CompletedWord(word, ctx.Prev1, ctx.Prev2, ctx.Prev1 is null && IsAtSentenceStart(ctx.Word.Length), learnable);
+            }
         }
 
         _tail.Append(c);
+        Position++;
         if (_tail.Length > MaxTail) _tail.Remove(0, _tail.Length - MaxTail);
         return completed;
     }
 
     public void Backspace()
     {
-        if (_tail.Length > 0) _tail.Length--;
+        if (_tail.Length == 0) return;
+        _tail.Length--;
+        Position--;
+    }
+
+    /// <summary>Символы, которые «склеивают» слово с адресом, почтой, путём или идентификатором.</summary>
+    private static bool IsAddressChar(char c) => c is '@' or '/' or '\\' or '_' or ':' or '#' or '=' or '&' or '<' or '>';
+
+    private static bool MixedScripts(string w)
+    {
+        bool cyr = false, lat = false;
+        foreach (var ch in w)
+        {
+            if (ch is >= 'Ѐ' and <= 'ӿ') cyr = true;
+            else if (ch is >= 'a' and <= 'z' or >= 'A' and <= 'Z') lat = true;
+        }
+        return cyr && lat;
     }
 
     public bool LastCharIs(char c) => _tail.Length > 0 && _tail[^1] == c;

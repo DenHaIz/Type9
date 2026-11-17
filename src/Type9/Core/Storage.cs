@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -50,23 +50,39 @@ internal static class Storage
     public static void Save<T>(string path, T value, JsonTypeInfo<T> info) =>
         WriteAtomic(path, JsonSerializer.Serialize(value, info));
 
-    /// <summary>Запись через временный файл, чтобы сбой не оставил полупустой файл.</summary>
-    public static void WriteAtomic(string path, string content)
+    private static readonly object WriteSync = new();
+
+    /// <summary>
+    /// Запись через временный файл с уникальным именем и сбросом на диск, затем атомарная замена.
+    /// Записи сериализуются, чтобы фоновое и немедленное сохранение не мешали друг другу. false — не удалось.
+    /// </summary>
+    public static bool WriteAtomic(string path, string content)
     {
-        try
+        lock (WriteSync)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            var tmp = path + ".tmp";
-            File.WriteAllText(tmp, content, new UTF8Encoding(false));
-            File.Move(tmp, path, true);
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"Не удалось сохранить {path}", ex);
+            string tmp = path + "." + Guid.NewGuid().ToString("N")[..8] + ".tmp";
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                using (var fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                using (var w = new StreamWriter(fs, new UTF8Encoding(false)))
+                {
+                    w.Write(content);
+                    w.Flush();
+                    fs.Flush(flushToDisk: true);
+                }
+                File.Move(tmp, path, overwrite: true);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Не удалось сохранить {path}", ex);
+                try { File.Delete(tmp); } catch { /* ignore */ }
+                return false;
+            }
         }
     }
 }
-
 internal static class Log
 {
     private static readonly object Sync = new();

@@ -23,7 +23,19 @@ internal static class Updater
 
     /// <summary>Обновлять файл можно только у собранного single-file exe (не при запуске из IDE).</summary>
 #pragma warning disable IL3000 // пустой Location — как раз признак single-file
-    public static bool CanSelfUpdate => string.IsNullOrEmpty(typeof(Updater).Assembly.Location) && Environment.ProcessPath is not null;
+    public static bool CanSelfUpdate => string.IsNullOrEmpty(typeof(Updater).Assembly.Location) && Environment.ProcessPath is not null
+                                        && FolderWritable(Path.GetDirectoryName(Environment.ProcessPath)!);
+
+    private static bool FolderWritable(string dir)
+    {
+        try
+        {
+            var probe = Path.Combine(dir, $".type9-{Guid.NewGuid():N}.probe");
+            using (File.Create(probe, 1, FileOptions.DeleteOnClose)) { }
+            return true;
+        }
+        catch { return false; }
+    }
 #pragma warning restore IL3000
 
 
@@ -82,6 +94,9 @@ internal static class Updater
     public static async Task InstallAsync(ReleaseInfo release, IProgress<double>? progress, CancellationToken ct = default)
     {
         if (!CanSelfUpdate) throw new InvalidOperationException(Loc.T("U.DevBuild"));
+        // Без контрольной суммы файл не ставим: размер не защищает от подмены
+        if (string.IsNullOrEmpty(release.Sha256) || release.Sha256.Length != 64)
+            throw new InvalidDataException("в релизе нет контрольной суммы SHA-256");
         var exe = Environment.ProcessPath!;
         var dir = Path.GetDirectoryName(exe)!;
         var tmp = Path.Combine(dir, Path.GetFileNameWithoutExtension(exe) + ".download");
@@ -108,7 +123,6 @@ internal static class Updater
         {
             if (release.Size > 0 && new FileInfo(tmp).Length != release.Size)
                 throw new InvalidDataException("размер файла не совпадает");
-            if (release.Sha256 is not null)
             {
                 await using var fs = File.OpenRead(tmp);
                 var hash = Convert.ToHexString(await SHA256.HashDataAsync(fs, ct)).ToLowerInvariant();

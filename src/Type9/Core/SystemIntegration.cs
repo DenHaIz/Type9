@@ -39,6 +39,24 @@ internal static class Elevation
 
 internal static class Autostart
 {
+    /// <summary>
+    /// exe лежит в папке, куда может писать обычный пользователь: тогда задача «с наивысшими правами» позволила бы
+    /// любой программе этого пользователя подменить exe и получить права администратора при следующем входе.
+    /// </summary>
+    public static bool ExeFolderIsUserWritable()
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(Paths.ExePath)!;
+            var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            var pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+            bool protectedDir = dir.StartsWith(pf, StringComparison.OrdinalIgnoreCase) ||
+                                (pf86.Length > 0 && dir.StartsWith(pf86, StringComparison.OrdinalIgnoreCase));
+            return !protectedDir;
+        }
+        catch { return true; }
+    }
+
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string Name = "Type9";
 
@@ -112,8 +130,10 @@ internal static class Autostart
               <Actions Context="Author"><Exec><Command>{Esc(Paths.ExePath)}</Command><Arguments>--autostart</Arguments></Exec></Actions>
             </Task>
             """;
-        var tmp = Path.Combine(Path.GetTempPath(), "type9-task.xml");
-        File.WriteAllText(tmp, xml, Encoding.Unicode);
+        // Уникальное имя + эксклюзивное создание: файл нельзя подменить заранее по известному пути
+        var tmp = Path.Combine(Path.GetTempPath(), $"type9-task-{Guid.NewGuid():N}.xml");
+        using (var fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+        using (var w = new StreamWriter(fs, Encoding.Unicode)) w.Write(xml);
         try
         {
             if (RunSchtasks($"/Create /TN \"{Name}\" /XML \"{tmp}\" /F") != 0)

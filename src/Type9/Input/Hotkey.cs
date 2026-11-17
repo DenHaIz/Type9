@@ -1,4 +1,4 @@
-using Type9.Native;
+﻿using Type9.Native;
 
 namespace Type9.Input;
 
@@ -13,6 +13,9 @@ public readonly record struct Hotkey(HotkeyModifiers Modifiers, int Key)
     public bool IsEmpty => Key == 0;
     public bool IsMouse => Key is Win32.VK_MBUTTON or Win32.VK_XBUTTON1 or Win32.VK_XBUTTON2;
 
+    /// <summary>Одиночная клавиша-модификатор (например, правый Ctrl): сама по себе не поглощается, чтобы RCtrl+C работал.</summary>
+    public bool IsSingleModifier => Modifiers == HotkeyModifiers.None && IsModifierKey(Key);
+
     private static readonly Dictionary<int, string> Names = new()
     {
         [Win32.VK_MBUTTON] = "MouseMiddle", [Win32.VK_XBUTTON1] = "Mouse4", [Win32.VK_XBUTTON2] = "Mouse5",
@@ -21,6 +24,9 @@ public readonly record struct Hotkey(HotkeyModifiers Modifiers, int Key)
         [Win32.VK_HOME] = "Home", [Win32.VK_END] = "End", [Win32.VK_PRIOR] = "PageUp", [Win32.VK_NEXT] = "PageDown",
         [Win32.VK_LEFT] = "Left", [Win32.VK_RIGHT] = "Right", [Win32.VK_UP] = "Up", [Win32.VK_DOWN] = "Down",
         [Win32.VK_PAUSE] = "Pause", [Win32.VK_CAPITAL] = "CapsLock", [Win32.VK_APPS] = "Menu",
+        [0x91] = "ScrollLock", [0x90] = "NumLock",
+        [Win32.VK_LCONTROL] = "LCtrl", [Win32.VK_RCONTROL] = "RCtrl", [Win32.VK_LMENU] = "LAlt", [Win32.VK_RMENU] = "RAlt",
+        [Win32.VK_LSHIFT] = "LShift", [Win32.VK_RSHIFT] = "RShift", [Win32.VK_LWIN] = "LWin", [Win32.VK_RWIN] = "RWin",
         [0xC0] = "`", [0xBD] = "-", [0xBB] = "=", [0xDB] = "[", [0xDD] = "]", [0xDC] = "\\",
         [0xBA] = ";", [0xDE] = "'", [0xBC] = ",", [0xBE] = ".", [0xBF] = "/",
     };
@@ -101,5 +107,6 @@ public readonly record struct Hotkey(HotkeyModifiers Modifiers, int Key)
         return m;
     }
 
-    public bool Matches(int vk, HotkeyModifiers mods) => !IsEmpty && vk == Key && mods == Modifiers;
+    public bool Matches(int vk, HotkeyModifiers mods) =>
+        !IsEmpty && vk == Key && (IsSingleModifier ? (mods & ~ModifierOf(vk)) == HotkeyModifiers.None : mods == Modifiers);
 }

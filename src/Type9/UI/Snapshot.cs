@@ -21,6 +21,7 @@ internal static class Snapshot
     {
         Directory.CreateDirectory(dir);
         var s = app.Settings;
+        s.RadialHotkey = "RCtrl"; // чтобы на снимке было видно предупреждение о конфликте
         foreach (var lang in new[] { AppLanguage.Russian, AppLanguage.English })
         foreach (var theme in new[] { AppTheme.Dark, AppTheme.Light })
         foreach (var scale in new[] { 100, 130 })
@@ -41,6 +42,16 @@ internal static class Snapshot
                 w.Navigate(section);
                 await Settle();
                 Save(w, Path.Combine(dir, $"settings-{section}-{tag}.png"));
+                if (section == "general" && w.FindName("SecGeneral") is System.Windows.Controls.ScrollViewer sv)
+                {
+                    sv.ScrollToVerticalOffset(sv.ScrollableHeight * 0.55);
+                    await Settle();
+                    Save(w, Path.Combine(dir, $"settings-general2-{tag}.png"));
+                    sv.ScrollToEnd();
+                    await Settle();
+                    Save(w, Path.Combine(dir, $"settings-general3-{tag}.png"));
+                    sv.ScrollToHome();
+                }
             }
             w.Close();
 

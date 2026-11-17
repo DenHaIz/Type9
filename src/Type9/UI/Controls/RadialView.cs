@@ -92,7 +92,9 @@ public sealed class RadialView : Grid
         center.Children.Add(_dots);
         Children.Add(center);
 
-        ThemeManager.Changed += Recolor;
+        // Подписка на статическое событие только пока элемент в дереве — иначе закрытое окно настроек не освободится
+        Loaded += (_, _) => { ThemeManager.Changed -= Recolor; ThemeManager.Changed += Recolor; };
+        Unloaded += (_, _) => ThemeManager.Changed -= Recolor;
         MouseMove += OnMouseMove;
         MouseLeave += (_, _) => { if (InteractiveHover) Select(-1); };
         MouseLeftButtonUp += (_, _) => { if (_selected >= 0) SectorClicked?.Invoke(_selected); };
@@ -199,13 +201,12 @@ public sealed class RadialView : Grid
         if (index >= _sectors.Count) index = -1;
         if (index == _selected) return;
         var c = Palette();
-        var d = animate ? Motion.Fast : new Duration(TimeSpan.Zero);
 
-        if (_selected >= 0) ApplyStyle(_sectors[_selected], false, c, d);
+        if (_selected >= 0) ApplyStyle(_sectors[_selected], false, c);
         _selected = index;
         if (_selected >= 0)
         {
-            ApplyStyle(_sectors[_selected], true, c, d);
+            ApplyStyle(_sectors[_selected], true, c);
             var p = _group!.Phrases[_selected];
             _preview.Text = p.Text.Replace("\r", "").TrimEnd();
             _preview.SetResourceReference(TextBlock.ForegroundProperty, "B.Fg");
@@ -219,18 +220,42 @@ public sealed class RadialView : Grid
         }
     }
 
-    private static void ApplyStyle(Sector s, bool on, (Color sector, Color fg, Color muted, Color accent, Color onAccent) c, Duration d)
-    {
-        var ease = on ? Motion.Spring : Motion.EaseOut;
-        s.Fill.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(on ? c.accent : c.sector, d) { EasingFunction = Motion.EaseOut });
-        s.LabelBrush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(on ? c.onAccent : c.fg, d));
-        s.NumberBrush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(on ? c.onAccent : c.muted, d));
-        var target = on ? RadialGeometry.At(new Point(0, 0), Push, s.Mid) : new Point(0, 0);
-        var dur = on ? new Duration(TimeSpan.FromMilliseconds(160)) : d;
-        s.Shift.Animate(TranslateTransform.XProperty, target.X, dur, ease);
-        s.Shift.Animate(TranslateTransform.YProperty, target.Y, dur, ease);
-    }
+    private static readonly Duration SelectIn = TimeSpan.FromMilliseconds(70);
+    private static readonly Duration SelectOut = TimeSpan.FromMilliseconds(120);
+    private static readonly Duration PushIn = TimeSpan.FromMilliseconds(110);
 
+    /// <summary>
+    /// Подсветка сектора. Выбор должен ощущаться мгновенным: цвет сразу прыгает на 75% пути к акценту
+    /// и за 4 кадра доходит до конца, подпись перекрашивается сразу, выдвижение — быстрая кривая без «пружины».
+    /// Снятие выделения — чуть дольше и мягче. Recolor (смена темы) передаёт свою длительность.
+    /// </summary>
+    private static void ApplyStyle(Sector s, bool on, (Color sector, Color fg, Color muted, Color accent, Color onAccent) c, Duration? themeDuration = null)
+    {
+        if (themeDuration is { } td)
+        {
+            s.Fill.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(on ? c.accent : c.sector, td));
+            s.LabelBrush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(on ? c.onAccent : c.fg, td));
+            s.NumberBrush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(on ? c.onAccent : c.muted, td));
+            return;
+        }
+
+        var from = s.Fill.Color;
+        var to = on ? c.accent : c.sector;
+        var jump = on ? ThemeManager.Mix(from, to, 0.75) : from;
+        s.Fill.BeginAnimation(SolidColorBrush.ColorProperty,
+            new ColorAnimation(jump, to, on ? SelectIn : SelectOut) { EasingFunction = Motion.EaseOut });
+
+        // Текст — без анимации: читается сразу
+        s.LabelBrush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+        s.LabelBrush.Color = on ? c.onAccent : c.fg;
+        s.NumberBrush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+        s.NumberBrush.Color = on ? c.onAccent : c.muted;
+
+        var target = on ? RadialGeometry.At(new Point(0, 0), Push, s.Mid) : new Point(0, 0);
+        var dur = on ? PushIn : SelectOut;
+        s.Shift.Animate(TranslateTransform.XProperty, target.X, dur, Motion.EaseOutStrong);
+        s.Shift.Animate(TranslateTransform.YProperty, target.Y, dur, Motion.EaseOutStrong);
+    }
     private void Recolor()
     {
         var c = Palette();

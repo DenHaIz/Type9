@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 using System.Windows.Threading;
 using Type9.Core;
@@ -14,12 +14,15 @@ internal interface IInputSink
     void OnSelectionChanged(int selected);
     void OnHideSuggestions();
     void OnLearn(CompletedWord word);
-    void OnRadialOpen();
+    /// <param name="delayed">Одиночный модификатор: открыть, только если клавиша всё ещё зажата через ~140 мс.</param>
+    void OnRadialOpen(bool delayed);
     void OnRadialCommit();
     void OnRadialCancel();
     void OnRadialDigit(int index);
     void OnRadialPage(int delta);
     void OnTogglePause();
+    /// <summary>Сменилось окно/поле ввода: UI проверяет его на «пароль» через UI Automation.</summary>
+    void OnFocusChanged();
 }
 
 internal sealed record SuggestionSnapshot(int Version, IReadOnlyList<Suggestion> Items, int Selected);
@@ -85,12 +88,27 @@ internal sealed class InputEngine : IDisposable
     /// <summary>Режим записи хоткея в настройках: весь ввод пропускается без обработки.</summary>
     public bool CaptureMode { get => _captureMode; set => _captureMode = value; }
 
-    /// <summary>Поле ввода оказалось паролем (определено через UI Automation).</summary>
+    /// <summary>Поле ввода оказалось паролем (определено через UI Automation): всё набранное выбрасываем, не обучаясь.</summary>
     public void MarkPasswordField()
     {
         _suppressed = true;
-        ResetTracking();
+        lock (_sync)
+        {
+            _pending.Clear();
+            _tracker.Reset();
+        }
+        _fieldVerified = true;
+        _autoSpace = false;
+        _snap = null;
+        Changed();
     }
+
+    /// <summary>Поле проверено (не пароль) — отложенное обучение можно фиксировать.</summary>
+    public void MarkFieldVerified() => _fieldVerified = true;
+
+    // Пока текущее поле не проверено на «пароль» через UI Automation, набранное не попадает в словарь
+    private volatile bool _fieldVerified;
+    private bool _capsDown, _pauseHeld;
 
     public Win32.RECT PopupRect
     {
@@ -135,29 +153,65 @@ internal sealed class InputEngine : IDisposable
     {
         if (_captureMode) return false;
 
-        if (vk == Win32.VK_CAPITAL && down && (flags & Win32.LLKHF_INJECTED) == 0) _capsOn = !_capsOn;
-
         var opt = _opt;
-        if (!down) return OnKeyUp(vk, opt);
+        var hk = opt.RadialHotkey;
+        bool singleMod = hk.IsSingleModifier;
+
+        // CapsLock переключает регистр по нажатию (не по автоповтору) и только если он сам не назначен на меню
+        if (vk == Win32.VK_CAPITAL)
+        {
+            bool capsIsHotkey = hk.Key == Win32.VK_CAPITAL && hk.Modifiers == HotkeyModifiers.None && !_paused
+                                && Hotkey.CurrentModifiers() == HotkeyModifiers.None;
+            if (down && !_capsDown && !capsIsHotkey) _capsOn = !_capsOn;
+            _capsDown = down;
+        }
+
+        if (!down)
+        {
+            if (_pauseHeld && vk == opt.PauseHotkey.Key) { _pauseHeld = false; return true; }
+            return OnKeyUp(vk, opt);
+        }
+        if (_pauseHeld && vk == opt.PauseHotkey.Key) return true; // автоповтор клавиши паузы
 
         // автоповтор зажатого хоткея меню
-        if (_hotkeyHeld && vk == _hotkeyKey) return true;
+        if (_hotkeyHeld && vk == _hotkeyKey) return !singleMod;
 
         var mods = Hotkey.CurrentModifiers();
 
         if (opt.PauseHotkey.Matches(vk, mods))
         {
+            _pauseHeld = true;
             Post(_sink.OnTogglePause);
             if (mods.HasFlag(HotkeyModifiers.Alt) || mods.HasFlag(HotkeyModifiers.Win)) TextInjector.Dummy();
             return true;
         }
         if (_paused) return false;
 
-        if (_radialOpen && HandleRadialKey(vk)) return true;
-
-        if (!opt.RadialHotkey.IsMouse && opt.RadialHotkey.Matches(vk, mods))
+        // Повторное нажатие хоткея в режиме «нажатие» закрывает меню (проверяем раньше клавиш управления меню)
+        if (_radialOpen && opt.RadialTrigger == RadialTrigger.Toggle && !hk.IsMouse && !singleMod && hk.Matches(vk, mods))
         {
             TriggerRadial(vk, opt);
+            return true;
+        }
+        if (_radialOpen && HandleRadialKey(vk)) return true;
+
+        // Одиночный модификатор зажат и нажата другая клавиша — это обычное сочетание (RCtrl+C): меню не нужно
+        if (_hotkeyHeld && singleMod && !Hotkey.IsModifierKey(vk))
+        {
+            _hotkeyHeld = false;
+            _otherKeyDuringHold = true;
+            if (_radialOpen) Post(_sink.OnRadialCancel);
+        }
+
+        if (!hk.IsMouse && hk.Matches(vk, mods))
+        {
+            TriggerRadial(vk, opt);
+            if (singleMod)
+            {
+                // Сам модификатор пропускаем в систему; «пустая» клавиша гасит меню окна (Alt) и «Пуск» (Win)
+                if (Hotkey.ModifierOf(vk) is HotkeyModifiers.Alt or HotkeyModifiers.Win) TextInjector.Dummy();
+                return false;
+            }
             if (mods.HasFlag(HotkeyModifiers.Alt) || mods.HasFlag(HotkeyModifiers.Win)) TextInjector.Dummy();
             return true;
         }
@@ -166,14 +220,24 @@ internal sealed class InputEngine : IDisposable
         return HandleTyping(vk, scan, mods, opt);
     }
 
+    /// <summary>Клавиша меню всё ещё зажата (для отложенного открытия при одиночном модификаторе).</summary>
+    public bool IsHotkeyHeld => _hotkeyHeld;
+
+    private bool _otherKeyDuringHold;
+
     private bool OnKeyUp(int vk, EngineOptions opt)
     {
         if (_hotkeyHeld && vk == _hotkeyKey)
         {
             _hotkeyHeld = false;
+            bool singleMod = opt.RadialHotkey.IsSingleModifier;
             if (opt.RadialTrigger == RadialTrigger.Hold && _radialOpen) Post(_sink.OnRadialCommit);
-            return true;
+            // Режим «нажатие» с одиночным модификатором: меню открывается по отпусканию, если это было «чистое» нажатие
+            if (singleMod && opt.RadialTrigger == RadialTrigger.Toggle && !_otherKeyDuringHold)
+                Post(_radialOpen ? _sink.OnRadialCancel : () => _sink.OnRadialOpen(false));
+            return !singleMod;
         }
+        if (vk == _hotkeyKey && _otherKeyDuringHold) return false;
         // В режиме удержания отпускание модификатора хоткея тоже завершает выбор
         if (_hotkeyHeld && opt.RadialTrigger == RadialTrigger.Hold && _radialOpen)
         {
@@ -187,11 +251,15 @@ internal sealed class InputEngine : IDisposable
     {
         _hotkeyHeld = true;
         _hotkeyKey = key;
+        _otherKeyDuringHold = false;
+        bool singleMod = opt.RadialHotkey.IsSingleModifier;
+        if (singleMod && opt.RadialTrigger == RadialTrigger.Toggle) return; // решим по отпусканию
         if (opt.RadialTrigger == RadialTrigger.Toggle && _radialOpen) Post(_sink.OnRadialCancel);
         else
         {
             ClearSuggestionsAndHide();
-            Post(_sink.OnRadialOpen);
+            // Одиночный модификатор открывает меню с короткой задержкой: быстрые сочетания (RCtrl+C) его не вызывают
+            Post(() => _sink.OnRadialOpen(singleMod));
         }
     }
 
@@ -249,20 +317,26 @@ internal sealed class InputEngine : IDisposable
         bool altGr = mods.HasFlag(HotkeyModifiers.Ctrl) && mods.HasFlag(HotkeyModifiers.Alt);
         if ((mods & (HotkeyModifiers.Ctrl | HotkeyModifiers.Alt | HotkeyModifiers.Win)) != 0 && !altGr)
         {
-            ResetTracking(); // Ctrl+V, Ctrl+Backspace, Alt+Tab... — текст изменился непредсказуемо
+            // Ctrl+V, Alt+Tab... — текст изменился непредсказуемо. Ctrl+Backspace / Ctrl+Z — исправление: не учим
+            ResetTracking(commit: vk is not (Win32.VK_BACK or 'Z'));
             return false;
         }
 
         switch (vk)
         {
             case Win32.VK_BACK:
-                lock (_sync) _tracker.Backspace();
+                lock (_sync)
+                {
+                    _tracker.Backspace();
+                    ForgetEdited();
+                }
                 _autoSpace = false;
                 Changed();
                 return false;
             case Win32.VK_LEFT or Win32.VK_RIGHT or Win32.VK_UP or Win32.VK_DOWN or Win32.VK_HOME or Win32.VK_END
                 or Win32.VK_PRIOR or Win32.VK_NEXT or Win32.VK_DELETE or Win32.VK_INSERT or Win32.VK_ESCAPE or Win32.VK_TAB:
-                ResetTracking();
+                // ←, Home, Delete — обычно возврат к только что набранному для правки: такое не запоминаем
+                ResetTracking(commit: vk is not (Win32.VK_LEFT or Win32.VK_HOME or Win32.VK_DELETE));
                 return false;
             case >= Win32.VK_F1 and <= Win32.VK_F24:
                 return false;
@@ -277,21 +351,20 @@ internal sealed class InputEngine : IDisposable
         {
             _autoSpace = false;
             TextInjector.Type(c.ToString(), 1, false);
-            CompletedWord? done;
             lock (_sync)
             {
                 _tracker.Backspace();
-                done = _tracker.Feed(c);
+                ForgetEdited();
+                Queue(_tracker.Feed(c));
             }
-            if (done is { } w0 && opt.LearnEnabled) Post(() => _sink.OnLearn(w0));
+            FlushLearning(false);
             Changed();
             return true;
         }
 
         _autoSpace = false;
-        CompletedWord? completed;
-        lock (_sync) completed = _tracker.Feed(c);
-        if (completed is { } w && opt.LearnEnabled) Post(() => _sink.OnLearn(w));
+        lock (_sync) Queue(_tracker.Feed(c));
+        FlushLearning(false);
         Changed();
         return false;
     }
@@ -325,15 +398,13 @@ internal sealed class InputEngine : IDisposable
         var opt = _opt;
         TextInjector.Type(s.Insert, s.Backspaces, opt.NewlineAsShiftEnter);
 
-        var learned = new List<CompletedWord>(2);
         lock (_sync)
         {
             for (int i = 0; i < s.Backspaces; i++) _tracker.Backspace();
-            foreach (var c in s.Insert)
-                if (_tracker.Feed(c) is { } w) learned.Add(w);
+            ForgetEdited();
+            foreach (var c in s.Insert) Queue(_tracker.Feed(c));
         }
-        if (opt.LearnEnabled && learned.Count > 0)
-            Post(() => { foreach (var w in learned) _sink.OnLearn(w); });
+        FlushLearning(false);
 
         _autoSpace = s.Insert.EndsWith(' ');
         _snap = null;
@@ -404,7 +475,9 @@ internal sealed class InputEngine : IDisposable
     private void OnWinEvent(uint evt, IntPtr hwnd)
     {
         ResetTracking();
+        _fieldVerified = false; // новое поле: пока UI Automation не подтвердит, что это не пароль, ничего не учим
         EvaluateSuppression();
+        Post(_sink.OnFocusChanged);
     }
 
     private void EvaluateSuppression()
@@ -460,8 +533,49 @@ internal sealed class InputEngine : IDisposable
 
     // ------------------------------------------------------------------ служебное
 
-    private void ResetTracking()
+    // ------------------------------------------------------------------ отложенное обучение
+    // Слово запоминается, когда пользователь уже начал следующее слово (CommitDistance символов после него),
+    // при паузе в наборе (CommitPendingLearning из UI через ~1,5 с) или при смене поля. Если он сразу вернулся
+    // Backspace и исправил слово (опечатка), ошибочная версия в словарь не попадёт.
+
+    private const int CommitDistance = 3;
+    private readonly List<(CompletedWord Word, long End)> _pending = [];
+
+    /// <summary>Под _sync: слово завершено разделителем; End — позиция сразу после слова.</summary>
+    private void Queue(CompletedWord? w)
     {
+        if (w is not { } word || !word.Learnable || !_opt.LearnEnabled) return;
+        _pending.Add((word, _tracker.Position - 1));
+        if (_pending.Count > 64) _pending.RemoveAt(0); // поле так и не проверено — не копим бесконечно
+    }
+
+    /// <summary>Под _sync: Backspace дошёл до слова — оно редактируется, не учим.</summary>
+    private void ForgetEdited() => _pending.RemoveAll(p => _tracker.Position <= p.End);
+
+    /// <summary>Пауза в наборе — фиксируем всё отложенное (вызывается из UI по таймеру).</summary>
+    public void CommitPendingLearning() => FlushLearning(all: true);
+
+    private void FlushLearning(bool all)
+    {
+        if (!_fieldVerified) return; // ждём проверки поля на «пароль»
+        List<CompletedWord>? ready = null;
+        lock (_sync)
+        {
+            for (int i = 0; i < _pending.Count; i++)
+            {
+                if (!all && _tracker.Position - _pending[i].End < CommitDistance) continue;
+                (ready ??= []).Add(_pending[i].Word);
+                _pending.RemoveAt(i--);
+            }
+        }
+        if (ready is not null) Post(() => { foreach (var w in ready) _sink.OnLearn(w); });
+    }
+
+    /// <param name="commit">true — набранное окончательно (ушли из поля/строки); false — правка, отложенное выбрасываем.</param>
+    private void ResetTracking(bool commit = true)
+    {
+        if (commit && _fieldVerified) FlushLearning(all: true);
+        else lock (_sync) _pending.Clear();
         bool hadSomething;
         lock (_sync)
         {

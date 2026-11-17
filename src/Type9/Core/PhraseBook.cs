@@ -73,13 +73,32 @@ public sealed class Abbreviation : Observable
 
 public sealed class PhraseBook
 {
+    /// <summary>Версия стандартного набора, из которого создан файл (0 — старые версии программы).</summary>
+    public int Version { get; set; }
+    public const int CurrentDefaultsVersion = 3;
+
     public ObservableCollection<PhraseGroup> Groups { get; set; } = [];
     public ObservableCollection<Abbreviation> Abbreviations { get; set; } = [];
+
+    private static readonly HashSet<string> LegacyPhraseTexts = ["{time}", "All the best!", "Best regards,\n", "Could you please ", "Could you please clarify ", "Dear colleagues, ", "Done ✅ ", "Good afternoon, ", "Good evening, ", "Good morning, ", "Got it, I'm on it. ", "Have a great day!", "Have a nice day!", "Have a nice weekend!", "Hello, ", "Hi team, ", "Hi! ", "Hope you're doing well. ", "I appreciate your help. ", "I hope you are doing well. ", "If you have any questions, feel free to ask.", "If you have any questions, feel free to reach out.", "Kind regards,\n", "Let me check and get back to you. ", "Looking forward to hearing from you.", "Noted, thank you. ", "One moment, please. ", "Please confirm receipt of this email. ", "Please find attached ", "Please let me know your availability. ", "Please send me a screenshot of the error. ", "Sorry for the delay in getting back to you. ", "Sorry to bother you. ", "Sounds good, deal. ", "Sounds good. ", "Talk soon!", "Thank you for reaching out! ", "Thank you for your patience. ", "Thank you for your quick reply! ", "Thank you for your understanding. ", "Thank you! ", "Thanks for the information. ", "Thanks for your patience! ", "Thanks in advance! ", "The issue has been resolved, please check. ", "Today is {date}", "Unfortunately, ", "We apologize for the inconvenience. ", "We will reply within one business day. ", "Yes, that is correct. ", "Yes, that's correct. ", "Благодарим за сотрудничество! ", "Благодарю за информацию. ", "Благодарю за обращение! ", "Будем рады помочь! ", "Буду признателен(на) за обратную связь. ", "Взял(а) в работу. ", "Вопрос решён, проверьте, пожалуйста. ", "Всего доброго!", "Готово ✅ ", "Да, всё верно. ", "До связи!", "Доброе утро, ", "Добрый вечер, ", "Добрый день! Благодарим за обращение. ", "Добрый день, ", "Если остались вопросы — пишите, буду рад(а) помочь.", "Заранее спасибо! ", "Здравствуйте, ", "Здравствуйте, коллеги! ", "Извините за беспокойство. ", "Извините за задержку с ответом. ", "К сожалению, ", "Минуту, пожалуйста, уточняю информацию. ", "Минуту, пожалуйста. ", "Направьте, пожалуйста, документы на почту. ", "Направьте, пожалуйста, реквизиты для оплаты. ", "Не могли бы вы ", "Ответим в течение рабочего дня. ", "Подскажите, пожалуйста, ", "Привет! ", "Приветствую! ", "Приносим извинения за доставленные неудобства. ", "Принято, взял(а) в работу. ", "Принято, спасибо. ", "Пришлите, пожалуйста, скриншот ошибки. ", "Прошу подтвердить получение письма. ", "Прошу прощения за ожидание. ", "Прошу согласовать до конца недели. ", "Рад(а) вас слышать! ", "С уважением,\n", "Сегодня {date}", "Сожалеем, что так получилось. Уже разбираемся. ", "Спасибо за ожидание! ", "Спасибо за оперативный ответ! ", "Спасибо за терпение и понимание. ", "Спасибо! ", "Спасибо, хорошего дня! ", "Уважаемые коллеги, ", "Уточните, пожалуйста, ", "Уточню и вернусь с ответом. ", "Хорошего дня!", "Хороших выходных!", "Хорошо, договорились. "];
+    private static readonly HashSet<string> LegacyAbbreviationTexts = ["Be right back", "Best regards,\n", "Good morning, ", "Have a great day!", "Have a nice day!", "please", "Thank you! ", "Thanks in advance! ", "Всего доброго!", "Доброе утро, ", "Добрый вечер, ", "Добрый день, ", "Здравствуйте, ", "Извините за задержку с ответом. ", "Подскажите, пожалуйста, ", "пожалуйста", "С уважением,\n", "Спасибо за обращение! ", "Спасибо! ", "Уточните, пожалуйста, ", "Хорошего дня!"];
+    private static readonly HashSet<string> LegacyGroupNames = ["Apologies", "Closing", "Greetings", "Replies", "Requests", "Thanks", "Благодарность", "Завершение", "Извинения", "Ответы", "Приветствия", "Просьбы"];
+
+
+    /// <summary>
+    /// Набор из прошлых версий, который пользователь не менял (только стандартные тексты, допускаются удаления
+    /// и перестановки), — его можно молча заменить новым стандартным набором.
+    /// </summary>
+    public bool IsUntouchedLegacyDefaults() =>
+        Version < CurrentDefaultsVersion &&
+        Groups.All(g => LegacyGroupNames.Contains(g.Name) && g.Phrases.All(p => LegacyPhraseTexts.Contains(p.Text))) &&
+        Abbreviations.All(a => LegacyAbbreviationTexts.Contains(a.Text));
 
     public static PhraseBook CreateDefault(AppLanguage lang) => lang == AppLanguage.English ? CreateEnglish() : CreateRussian();
 
     private static PhraseBook CreateRussian() => new()
     {
+        Version = CurrentDefaultsVersion,
         Groups =
         [
             new PhraseGroup("Приветствия",
@@ -87,53 +106,53 @@ public sealed class PhraseBook
                 new Phrase("Добрый день, "),
                 new Phrase("Доброе утро, "),
                 new Phrase("Добрый вечер, "),
-                new Phrase("Здравствуйте, коллеги! ", "Коллеги"),
-                new Phrase("Уважаемые коллеги, ", "Уважаемые коллеги"),
-                new Phrase("Добрый день! Благодарим за обращение. ", "Спасибо за обращение"),
+                new Phrase("Здравствуйте, коллеги! "),
+                new Phrase("Добрый день, коллеги! "),
+                new Phrase("Здравствуйте! Спасибо, что обратились к нам. ", "Спасибо, что обратились"),
                 new Phrase("Приветствую! ")),
             new PhraseGroup("Благодарность",
                 new Phrase("Спасибо! "),
-                new Phrase("Благодарю за информацию. ", "За информацию"),
-                new Phrase("Спасибо за оперативный ответ! ", "За быстрый ответ"),
-                new Phrase("Спасибо за ожидание! ", "За ожидание"),
-                new Phrase("Спасибо за терпение и понимание. ", "За понимание"),
-                new Phrase("Благодарим за сотрудничество! ", "За сотрудничество"),
-                new Phrase("Заранее спасибо! "),
-                new Phrase("Спасибо, хорошего дня! ", "Спасибо, хорошего дня")),
+                new Phrase("Большое спасибо! "),
+                new Phrase("Спасибо за информацию. "),
+                new Phrase("Спасибо за быстрый ответ! "),
+                new Phrase("Спасибо за ожидание. "),
+                new Phrase("Спасибо за понимание. "),
+                new Phrase("Благодарим за сотрудничество! "),
+                new Phrase("Заранее спасибо! ")),
             new PhraseGroup("Ответы",
-                new Phrase("Принято, спасибо. ", "Принято"),
-                new Phrase("Хорошо, договорились. ", "Договорились"),
-                new Phrase("Да, всё верно. ", "Всё верно"),
-                new Phrase("Взял(а) в работу. ", "В работе"),
-                new Phrase("Уточню и вернусь с ответом. ", "Уточню и вернусь"),
-                new Phrase("Минуту, пожалуйста, уточняю информацию. ", "Минуту"),
-                new Phrase("Вопрос решён, проверьте, пожалуйста. ", "Вопрос решён"),
-                new Phrase("Ответим в течение рабочего дня. ", "В течение дня")),
+                new Phrase("Хорошо, договорились. "),
+                new Phrase("Да, всё верно. "),
+                new Phrase("Принято, спасибо. "),
+                new Phrase("Принято в работу. "),
+                new Phrase("Сейчас уточню и вернусь с ответом. ", "Уточню и вернусь"),
+                new Phrase("Одну минуту, проверяю. "),
+                new Phrase("Готово, проверьте, пожалуйста. ", "Готово, проверьте"),
+                new Phrase("Ответим в течение рабочего дня. ", "Ответим в течение дня")),
             new PhraseGroup("Просьбы",
                 new Phrase("Подскажите, пожалуйста, "),
                 new Phrase("Уточните, пожалуйста, "),
                 new Phrase("Не могли бы вы "),
                 new Phrase("Пришлите, пожалуйста, скриншот ошибки. ", "Пришлите скриншот"),
-                new Phrase("Направьте, пожалуйста, документы на почту. ", "Пришлите документы"),
-                new Phrase("Прошу подтвердить получение письма. ", "Подтвердите получение"),
-                new Phrase("Прошу согласовать до конца недели. ", "Согласовать"),
-                new Phrase("Направьте, пожалуйста, реквизиты для оплаты. ", "Реквизиты")),
+                new Phrase("Пришлите, пожалуйста, документы на почту. ", "Пришлите документы"),
+                new Phrase("Подтвердите, пожалуйста, получение письма. ", "Подтвердите получение"),
+                new Phrase("Сообщите, пожалуйста, удобное время для звонка. ", "Удобное время для звонка"),
+                new Phrase("Направьте, пожалуйста, реквизиты для оплаты. ", "Реквизиты для оплаты")),
             new PhraseGroup("Извинения",
-                new Phrase("Извините за задержку с ответом. ", "За задержку"),
-                new Phrase("Приносим извинения за доставленные неудобства. ", "За неудобства"),
-                new Phrase("Прошу прощения за ожидание. ", "За ожидание"),
-                new Phrase("Извините за беспокойство. ", "За беспокойство"),
+                new Phrase("Извините за задержку с ответом. ", "Извините за задержку"),
+                new Phrase("Приносим извинения за неудобства. ", "Извините за неудобства"),
+                new Phrase("Извините за ожидание. "),
+                new Phrase("Извините за беспокойство. "),
                 new Phrase("К сожалению, "),
-                new Phrase("Сожалеем, что так получилось. Уже разбираемся. ", "Уже разбираемся")),
+                new Phrase("Уже разбираемся, скоро вернёмся с ответом. ", "Уже разбираемся")),
             new PhraseGroup("Завершение",
                 new Phrase("С уважением,\n", "С уважением"),
                 new Phrase("Хорошего дня!"),
                 new Phrase("Всего доброго!"),
-                new Phrase("Если остались вопросы — пишите, буду рад(а) помочь.", "Остались вопросы?"),
-                new Phrase("Будем рады помочь! "),
                 new Phrase("Хороших выходных!"),
-                new Phrase("До связи!"),
-                new Phrase("Буду признателен(на) за обратную связь. ", "Жду обратной связи")),
+                new Phrase("Если появятся вопросы — пишите, с радостью поможем.", "Если появятся вопросы"),
+                new Phrase("Будем рады помочь!"),
+                new Phrase("Ждём вашего ответа. "),
+                new Phrase("До связи!")),
         ],
         Abbreviations =
         [
@@ -142,7 +161,7 @@ public sealed class PhraseBook
             new Abbreviation("дут", "Доброе утро, "),
             new Abbreviation("двеч", "Добрый вечер, "),
             new Abbreviation("спс", "Спасибо! "),
-            new Abbreviation("спсо", "Спасибо за обращение! "),
+            new Abbreviation("бсп", "Большое спасибо! "),
             new Abbreviation("пжл", "пожалуйста"),
             new Abbreviation("пдск", "Подскажите, пожалуйста, "),
             new Abbreviation("утч", "Уточните, пожалуйста, "),
@@ -152,9 +171,9 @@ public sealed class PhraseBook
             new Abbreviation("всдоб", "Всего доброго!"),
         ],
     };
-
     private static PhraseBook CreateEnglish() => new()
     {
+        Version = CurrentDefaultsVersion,
         Groups =
         [
             new PhraseGroup("Greetings",
@@ -218,6 +237,7 @@ public sealed class PhraseBook
     /// <summary>Заменяет содержимое стандартным набором (кнопка «Стандартные фразы»).</summary>
     public void ResetTo(PhraseBook defaults)
     {
+        Version = defaults.Version;
         Groups.Clear();
         foreach (var g in defaults.Groups) Groups.Add(g);
         Abbreviations.Clear();

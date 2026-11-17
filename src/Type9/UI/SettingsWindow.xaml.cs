@@ -250,6 +250,7 @@ internal partial class SettingsWindow : Window
         RefreshWords();
         RefreshPreview();
         RefreshUpdate();
+        UpdateHotkeyWarnings();
     }
 
     // ------------------------------------------------------------------ обновления
@@ -321,7 +322,33 @@ internal partial class SettingsWindow : Window
             _app.SettingsChanged();
             BuildCheatSheet();
             UpdateStatus();
+            UpdateHotkeyWarnings();
         }, DispatcherPriority.Background);
+    }
+
+    /// <summary>Предупреждение, если клавиша пересекается со стандартными сочетаниями (Ctrl+C, F5, Mouse4…).</summary>
+    private void UpdateHotkeyWarnings()
+    {
+        Show(RadialHotkeyWarning, RadialHotkeyWarningText, Input.HotkeyAdvisor.Check(Input.Hotkey.Parse(_app.Settings.RadialHotkey)));
+        Show(PauseHotkeyWarning, PauseHotkeyWarningText, Input.HotkeyAdvisor.Check(Input.Hotkey.Parse(_app.Settings.PauseHotkey)));
+
+        static void Show(Border box, TextBlock text, string? warning)
+        {
+            if (warning is null)
+            {
+                if (box.Visibility == Visibility.Visible)
+                    box.Animate(OpacityProperty, 0, Motion.Fast, Motion.EaseIn, completed: (_, _) => { if (text.Text.Length == 0) box.Visibility = Visibility.Collapsed; });
+                text.Text = "";
+                return;
+            }
+            bool changed = text.Text != warning;
+            text.Text = warning;
+            if (box.Visibility != Visibility.Visible || changed)
+            {
+                box.Visibility = Visibility.Visible;
+                Anim.Play(box, 6);
+            }
+        }
     }
 
     private void BuildAccentSwatches()
@@ -369,6 +396,8 @@ internal partial class SettingsWindow : Window
         ModeElevated.IsChecked = _app.Settings.Mode == RunMode.Elevated;
         ModeStatus.Text = Loc.T(Elevation.IsElevated ? "Mode.IsAdmin"
             : _app.Settings.Mode == RunMode.Elevated ? "Mode.AdminFailed" : "Mode.IsNormal");
+        if (_app.Settings.Mode == RunMode.Elevated && Autostart.ExeFolderIsUserWritable())
+            ModeStatus.Text += Environment.NewLine + Loc.T("Mode.WritableWarn");
     }
 
     private void Mode_Click(object sender, RoutedEventArgs e)

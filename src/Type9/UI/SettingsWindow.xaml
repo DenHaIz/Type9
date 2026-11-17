@@ -144,6 +144,14 @@
                 </StackPanel>
 
                 <Grid x:Name="SectionHost" Grid.Row="1">
+                    <!-- Мягкое затухание контента у верхнего края при прокрутке -->
+                    <Grid.OpacityMask>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1" MappingMode="RelativeToBoundingBox">
+                            <GradientStop Color="#00000000" Offset="0" />
+                            <GradientStop Color="#FF000000" Offset="0.025" />
+                            <GradientStop Color="#FF000000" Offset="1" />
+                        </LinearGradientBrush>
+                    </Grid.OpacityMask>
 
                     <!-- ============ ОБЩИЕ ============ -->
                     <ScrollViewer x:Name="SecGeneral" Tag="general" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
@@ -338,7 +346,16 @@
                                         </StackPanel>
                                         <c:HotkeyBox Grid.Column="1" Hotkey="{Binding RadialHotkey}" VerticalAlignment="Center" Width="180" />
                                     </Grid>
-                                    <Grid Style="{StaticResource Row}">
+                                    <Border x:Name="RadialHotkeyWarning" Visibility="Collapsed" Margin="0,-6,0,14" CornerRadius="8" Padding="10,8" Background="{DynamicResource B.AccentSoft}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource T.Icon}" Text="&#xE7BA;" Foreground="{DynamicResource B.AccentFg}" Margin="0,1,10,0" VerticalAlignment="Top" />
+                                            <TextBlock x:Name="RadialHotkeyWarningText" Grid.Column="1" Style="{StaticResource T.Body}" FontSize="12" />
+                                        </Grid>
+                                    </Border>                                    <Grid Style="{StaticResource Row}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -364,7 +381,16 @@
                                         </StackPanel>
                                         <c:HotkeyBox Grid.Column="1" Hotkey="{Binding PauseHotkey}" AllowMouse="False" Width="180" />
                                     </Grid>
-                                    <CheckBox IsChecked="{Binding NewlineAsShiftEnter}" Margin="0,0,0,14">
+                                    <Border x:Name="PauseHotkeyWarning" Visibility="Collapsed" Margin="0,-6,0,14" CornerRadius="8" Padding="10,8" Background="{DynamicResource B.AccentSoft}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Style="{StaticResource T.Icon}" Text="&#xE7BA;" Foreground="{DynamicResource B.AccentFg}" Margin="0,1,10,0" VerticalAlignment="Top" />
+                                            <TextBlock x:Name="PauseHotkeyWarningText" Grid.Column="1" Style="{StaticResource T.Body}" FontSize="12" />
+                                        </Grid>
+                                    </Border>                                    <CheckBox IsChecked="{Binding NewlineAsShiftEnter}" Margin="0,0,0,14">
                                         <StackPanel>
                                             <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.ShiftEnter}" />
                                             <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.ShiftEnterHint}" />

@@ -148,12 +148,15 @@ public sealed class PredictionEngine
         foreach (var (key, st) in User.ByPrefix(prefix))
         {
             if (key.Length <= prefix.Length || ScriptOf(key) != script) continue;
+            // Незнакомое словарю слово, встреченное один раз, — скорее опечатка: предлагаем со второго употребления
+            if (st.Count < 2 && (model is null || model.Find(key) < 0)) continue;
             var c = Get(key, st.Form);
             c.Form = st.Form;
             double rec = Recency(now, st.LastUsed);
             c.UserUni = st.Count / userTotal * rec;
-            if (u1 > 0) c.UserCtx += 0.35 * User.Bigram(p1, key) / u1 * rec;
-            if (u2 > 0) c.UserCtx += 0.65 * User.Trigram(p2, p1, key) / u2 * rec;
+            // +2 в знаменателе: одно случайное сочетание не перевешивает устойчивые привычки
+            if (u1 > 0) c.UserCtx += 0.35 * User.Bigram(p1, key) / (u1 + 2) * rec;
+            if (u2 > 0) c.UserCtx += 0.65 * User.Trigram(p2, p1, key) / (u2 + 2) * rec;
         }
 
         double liftPow = model?.Language == "ru" ? 0.8 : 0.4;
@@ -248,14 +251,16 @@ public sealed class PredictionEngine
         double u1 = User.ContextTotal(p1);
         if (u1 > 0)
             foreach (var (k, c) in User.Followers(p1))
-                if (c >= minCount) Add(k, User.Get(k)?.Form ?? k, WUserCtx * 0.35 * c / u1 * Recency(now, User.Get(k)?.LastUsed ?? 0));
+                if (c >= minCount && Known(k)) Add(k, User.Get(k)?.Form ?? k, WUserCtx * 0.35 * c / (u1 + 2) * Recency(now, User.Get(k)?.LastUsed ?? 0));
         if (p2 is not null)
         {
             double u2 = User.ContextTotal(p2, p1);
             if (u2 > 0)
                 foreach (var (k, c) in User.Followers(p2, p1))
-                    if (c >= minCount) Add(k, User.Get(k)?.Form ?? k, WUserCtx * 0.65 * c / u2 * Recency(now, User.Get(k)?.LastUsed ?? 0));
+                    if (c >= minCount && Known(k)) Add(k, User.Get(k)?.Form ?? k, WUserCtx * 0.65 * c / (u2 + 2) * Recency(now, User.Get(k)?.LastUsed ?? 0));
         }
+
+        bool Known(string k) => (User.Get(k)?.Count ?? 0) >= 2 || (model ?? ModelFor(script))?.Find(k) >= 0;
 
         string lead = ctx.NeedsLeadingSpace ? " " : "";
         return scores

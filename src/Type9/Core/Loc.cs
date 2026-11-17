@@ -98,7 +98,7 @@ public static class Loc
         ["G.Corner"] = ("В углу экрана", "Screen corner"),
         ["G.Hotkeys"] = ("Горячие клавиши и вставка", "Hotkeys & insertion"),
         ["G.Wheel"] = ("Круговое меню фраз", "Phrase wheel"),
-        ["G.WheelHint"] = ("Можно назначить боковую кнопку мыши", "A side mouse button works too"),
+        ["G.WheelHint"] = ("Сочетание или одна клавиша: F1–F24, CapsLock, правый Ctrl/Alt (зажать и отпустить), кнопка мыши", "A shortcut or a single key: F1–F24, CapsLock, right Ctrl/Alt (press and release), a mouse button"),
         ["G.WheelMode"] = ("Как работает меню", "Wheel behavior"),
         ["G.WheelModeHint"] = ("Удерживать: зажали — навели — отпустили. Нажатие: открыли — кликнули. Цифры 1–8 работают всегда",
                                "Hold: press — point — release. Press: open — click. Digits 1–8 always work"),
@@ -138,7 +138,9 @@ public static class Loc
         ["Mode.UacDenied"] = ("Запрос прав администратора отклонён — режим не изменён.", "The administrator request was declined — mode unchanged."),
         ["Mode.StillAdmin"] = ("Режим изменён. Сейчас программа ещё работает с правами администратора — это сбросится при следующем запуске.",
                                "Mode changed. The app still has administrator rights until the next start."),
-        ["Autostart.On"] = ("Автозапуск включён", "Autostart is on"),
+        ["Mode.WritableWarn"] = ("Совет: для режима администратора положите Type9.exe в «C:\\Program Files\\Type9». Сейчас он лежит в папке, куда может писать любая программа, — его могут подменить и получить права администратора при входе.",
+                                 "Tip: for administrator mode put Type9.exe into “C:\\Program Files\\Type9”. It now sits in a folder any program can write to — it could be replaced to gain administrator rights at sign-in."),
+        ["Autostart.On"] =("Автозапуск включён", "Autostart is on"),
         ["Autostart.Off"] = ("Автозапуск выключен", "Autostart is off"),
         ["Autostart.NeedAdmin"] = ("Для автозапуска с правами администратора программа должна быть запущена от администратора.",
                                    "To autostart as administrator, the app must be running as administrator."),
@@ -224,7 +226,7 @@ public static class Loc
 
         // Поле хоткея, подсказка, меню, трей
         ["H.Press"] = ("Нажмите сочетание…", "Press a shortcut…"),
-        ["H.NeedMod"] = ("Нужен Ctrl, Alt или Win", "Ctrl, Alt or Win required"),
+        ["H.NeedMod"] = ("Буква без Ctrl/Alt мешала бы печатать", "A plain letter would block typing"),
         ["H.Tip"] = ("Нажмите поле и затем нужное сочетание. Esc — отмена.", "Click the field, then press the shortcut. Esc cancels."),
         ["Pop.Hint"] = ("Tab — вставить · ↑↓ — выбор · Esc — скрыть", "Tab — insert · ↑↓ — choose · Esc — hide"),
         ["R.Hover"] = ("Наведите на фразу", "Point at a phrase"),

@@ -35,7 +35,7 @@ public sealed class UserModel
 
     public void Learn(CompletedWord w, long now)
     {
-        if (!IsLearnable(w.Word)) return;
+        if (!w.Learnable || !IsLearnable(w.Word)) return;
         var key = CaseHelper.Normalize(w.Word);
 
         if (!_words.TryGetValue(key, out var st))
@@ -66,6 +66,7 @@ public sealed class UserModel
     /// <summary>Форма для показа: аббревиатуры и имена собственные сохраняем как есть, остальное — строчными.</summary>
     private static string PickForm(string word, bool sentenceStart, string? existing)
     {
+        if (existing is { Length: 0 }) existing = null;
         bool innerUpper = word.Skip(1).Any(char.IsUpper);
         if (innerUpper) return word;                          // ООО, iPhone
         if (char.IsUpper(word[0]))
@@ -134,6 +135,30 @@ public sealed class UserModel
         Version++;
     }
 
+    /// <summary>
+    /// Чистка: если словарь разросся, убираем слова, встреченные один раз и давно (обычно опечатки и разовые имена).
+    /// </summary>
+    public int Prune(long now, int maxWords = 150_000)
+    {
+        if (_words.Count <= maxWords) return 0;
+        var victims = _words.Where(kv => kv.Value.Count <= 1 && now - kv.Value.LastUsed > 60 * 1440)
+            .Select(kv => kv.Key).ToHashSet(StringComparer.Ordinal);
+        if (victims.Count == 0) return 0;
+        foreach (var k in victims)
+        {
+            TotalCount -= _words[k].Count;
+            _words.Remove(k);
+            _index.Remove(k);
+            _bigrams.Remove(k);
+        }
+        foreach (var m in _bigrams.Values) foreach (var k in m.Keys.Where(victims.Contains).ToList()) m.Remove(k);
+        foreach (var k in _trigrams.Keys.Where(k => k.Split(' ').Any(victims.Contains)).ToList()) _trigrams.Remove(k);
+        foreach (var m in _trigrams.Values) foreach (var k in m.Keys.Where(victims.Contains).ToList()) m.Remove(k);
+        Dirty = true;
+        Version++;
+        return victims.Count;
+    }
+
     public void Clear()
     {
         _words.Clear();
@@ -196,22 +221,24 @@ public sealed class UserModel
             if (p.Length < 4) continue;
             switch (p[0])
             {
-                case "W" when p.Length >= 5 && int.TryParse(p[3], CultureInfo.InvariantCulture, out var cnt):
+                case "W" when p.Length >= 5 && int.TryParse(p[3], CultureInfo.InvariantCulture, out var cnt) && cnt > 0
+                               && p[2].Length > 0 && IsLearnable(p[2]):
                     long.TryParse(p[4], CultureInfo.InvariantCulture, out var last);
-                    if (!_words.TryGetValue(p[1], out var st))
+                    var wkey = CaseHelper.Normalize(p[2]); // ключ из файла не доверяем — пересчитываем из формы
+                    if (!_words.TryGetValue(wkey, out var st))
                     {
-                        _words[p[1]] = st = new WordStat { Form = p[2] };
-                        _index.Add(p[1]);
+                        _words[wkey] = st = new WordStat { Form = p[2] };
+                        _index.Add(wkey);
                     }
                     st.Count += cnt;
                     TotalCount += cnt;
                     st.LastUsed = Math.Max(st.LastUsed, last);
                     break;
-                case "B" when int.TryParse(p[3], CultureInfo.InvariantCulture, out var bc):
-                    Inc(_bigrams, p[1], p[2], bc);
+                case "B" when int.TryParse(p[3], CultureInfo.InvariantCulture, out var bc) && bc > 0 && p[1].Length > 0 && p[2].Length > 0:
+                    Inc(_bigrams, CaseHelper.Normalize(p[1]), CaseHelper.Normalize(p[2]), bc);
                     break;
-                case "T" when int.TryParse(p[3], CultureInfo.InvariantCulture, out var tc):
-                    Inc(_trigrams, p[1], p[2], tc);
+                case "T" when int.TryParse(p[3], CultureInfo.InvariantCulture, out var tc) && tc > 0 && p[1].Contains(' ') && p[2].Length > 0:
+                    Inc(_trigrams, CaseHelper.Normalize(p[1]), CaseHelper.Normalize(p[2]), tc);
                     break;
             }
         }

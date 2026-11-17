@@ -28,8 +28,11 @@ public sealed class HotkeyBox : TextBox
 
     public HotkeyBox()
     {
+        // Подкласс не получает неявный стиль TextBox автоматически — берём его явно (иначе белое поле в тёмной теме)
+        SetResourceReference(StyleProperty, typeof(TextBox));
         IsReadOnly = true;
         IsReadOnlyCaretVisible = false;
+        FontWeight = FontWeights.Medium;
         Cursor = Cursors.Hand;
         MinWidth = 150;
         HorizontalContentAlignment = HorizontalAlignment.Center;
@@ -72,9 +75,12 @@ public sealed class HotkeyBox : TextBox
         var mods = Mods();
         if (Input.Hotkey.IsModifierKey(vk))
         {
-            Text = mods != HotkeyModifiers.None ? string.Join("+", mods.ToString().Split(", ")) + "+…" : Core.Loc.T("H.Press");
+            // Если модификатор отпустят без других клавиш — назначим его самого (например, правый Ctrl)
+            _pendingModifier = e.IsRepeat ? _pendingModifier : vk;
+            Text = string.Join("+", mods.ToString().Split(", ")) + "+…";
             return;
         }
+        _pendingModifier = 0;
 
         // Печатные клавиши без модификаторов сломали бы обычный набор текста
         bool printable = vk is >= 0x30 and <= 0x5A or Win32.VK_SPACE or >= 0xBA and <= 0xDF or Win32.VK_TAB or Win32.VK_RETURN or Win32.VK_BACK;
@@ -86,6 +92,23 @@ public sealed class HotkeyBox : TextBox
         }
         Hotkey = new Hotkey(mods, vk).ToString();
         Finish();
+    }
+
+    private int _pendingModifier;
+
+    protected override void OnPreviewKeyUp(KeyEventArgs e)
+    {
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        int vk = KeyInterop.VirtualKeyFromKey(key);
+        if (_pendingModifier != 0 && vk == _pendingModifier && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            e.Handled = true;
+            _pendingModifier = 0;
+            Hotkey = new Hotkey(HotkeyModifiers.None, vk).ToString();
+            Finish();
+            return;
+        }
+        base.OnPreviewKeyUp(e);
     }
 
     protected override void OnPreviewMouseDown(MouseButtonEventArgs e)

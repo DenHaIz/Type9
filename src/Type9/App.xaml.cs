@@ -68,6 +68,13 @@ public partial class App : Application
 
         var settings = Storage.Load(Paths.Settings, JsonCtx.Default.AppSettings, () => new AppSettings(), out bool settingsExisted);
         var phrases = Storage.Load(Paths.Phrases, JsonCtx.Default.PhraseBook, () => PhraseBook.CreateDefault(settings.Language), out bool phrasesExisted);
+        // Старый стандартный набор, который пользователь не менял, обновляем до нового
+        if (phrasesExisted && phrases.IsUntouchedLegacyDefaults())
+        {
+            phrases = PhraseBook.CreateDefault(settings.Language);
+            phrasesExisted = false;
+            Log.Info("Стандартные фразы обновлены до нового набора");
+        }
         if (!phrasesExisted) Storage.Save(Paths.Phrases, phrases, JsonCtx.Default.PhraseBook);
 
         // Режим администратора: при обычном запуске переподнимаемся через UAC

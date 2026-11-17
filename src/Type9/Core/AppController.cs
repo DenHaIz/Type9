@@ -71,20 +71,37 @@ internal sealed class AppController : IInputSink, IDisposable
         Task.Run(() =>
         {
             var extras = BaseDictionary.LoadExtras();
-            UserModel user;
-            try { user = File.Exists(Paths.UserDict) ? UserModel.Parse(File.ReadAllText(Paths.UserDict)) : new UserModel(); }
-            catch (Exception ex) { Log.Error("Не удалось загрузить пользовательский словарь", ex); user = new UserModel(); }
+            UserModel? user = null;
+            // Файл может быть временно занят (антивирус, OneDrive) — несколько попыток; при неудаче словарь
+            // не перезаписываем пустым до конца сеанса, а повреждённый файл сохраняем копией .broken
+            for (int attempt = 0; attempt < 5 && user is null; attempt++)
+            {
+                try { user = File.Exists(Paths.UserDict) ? UserModel.Parse(File.ReadAllText(Paths.UserDict)) : new UserModel(); }
+                catch (IOException) when (attempt < 4) { Thread.Sleep(400); }
+                catch (Exception ex)
+                {
+                    Log.Error("Не удалось загрузить пользовательский словарь — сохранение отключено до перезапуска", ex);
+                    try { File.Copy(Paths.UserDict, Paths.UserDict + ".broken", true); } catch { /* ignore */ }
+                    _dictSaveBlocked = true;
+                    user = new UserModel();
+                }
+            }
             _ui.BeginInvoke(() =>
             {
                 Prediction.Extra = extras;
-                Prediction.User = user;
+                // Слова, выученные, пока словарь грузился, не теряем — переносим в загруженный
+                var early = Prediction.User;
+                if (early.WordCount > 0) user!.Merge(early.Serialize());
+                Prediction.User = user!;
+                _dictLoaded = true;
                 DictionaryChanged?.Invoke();
-                Log.Info($"Личный словарь: {user.WordCount} слов, дополнительный: {extras.Count}");
+                Log.Info($"Личный словарь: {user!.WordCount} слов, дополнительный: {extras.Count}");
             });
         });
         EnsureLanguageModels();
 
         Engine.Start();
+        OnFocusChanged(); // проверить поле, в котором пользователь находится сейчас
         _tray = new TrayIcon(this);
         _dictSaveTimer.Start();
         StartUpdateSchedule();
@@ -220,8 +237,16 @@ internal sealed class AppController : IInputSink, IDisposable
     private PredictionOptions Options => new(Settings.MinPrefix, Settings.MaxSuggestions, Settings.AddSpaceAfterWord,
         Settings.NextWordPrediction, Settings.NextWordMinCount, Settings.SuggestLanguage);
 
+    private DispatcherTimer? _learnIdleTimer;
+
     public void OnContextChanged(int version, TypingContext ctx)
     {
+        // Пауза 1,5 с после последнего нажатия — фиксируем отложенное обучение (короткие сообщения тоже учатся)
+        _learnIdleTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(1500), DispatcherPriority.Background,
+            (_, _) => { _learnIdleTimer!.Stop(); Engine.CommitPendingLearning(); }, _ui);
+        _learnIdleTimer.Stop();
+        _learnIdleTimer.Start();
+
         if (_paused || _radial.IsOpen || !Settings.SuggestionsEnabled || ctx.IsEmpty)
         {
             HideSuggestions();
@@ -239,19 +264,31 @@ internal sealed class AppController : IInputSink, IDisposable
         _popup.SetItems(items, 0);
         _caret.Request(version, (v, info) =>
         {
-            if (v != Engine.Version) return;
             if (info.IsPassword)
             {
                 Engine.MarkPasswordField();
                 HideSuggestions();
                 return;
             }
+            Engine.MarkFieldVerified();
+            if (v != Engine.Version) return;
             _popup.ShowAt(info, Settings.Placement == PopupPlacement.Fixed);
             Engine.PopupRect = _popup.ScreenRect;
         });
     }
 
     public void OnSelectionChanged(int selected) => _popup.Select(selected);
+
+    /// <summary>Новое поле ввода: проверяем его на «пароль» (UI Automation) до того, как что-то запоминать.</summary>
+    public void OnFocusChanged() => _caret.Request(-2, (_, info) =>
+    {
+        if (info.IsPassword)
+        {
+            Engine.MarkPasswordField();
+            HideSuggestions();
+        }
+        else Engine.MarkFieldVerified();
+    });
 
     public void OnHideSuggestions() => HideSuggestions();
 
@@ -270,15 +307,51 @@ internal sealed class AppController : IInputSink, IDisposable
 
     // ------------------------------------------------------------------ круговое меню
 
-    public void OnRadialOpen()
+    private int _radialToken;
+
+    public void OnRadialOpen(bool delayed)
     {
         HideSuggestions();
-        _radial.Open(Phrases);
-        Engine.RadialOpen = _radial.IsOpen;
+        if (_radial.IsOpen) return;
+        int token = ++_radialToken;
+        Native.Win32.RECT? caret = null;
+        bool caretKnown = false, minDelayPassed = !delayed;
+
+        void TryOpen(bool force)
+        {
+            if (token != _radialToken || _radial.IsOpen) return;
+            if (!minDelayPassed || (!caretKnown && !force)) return;
+            // В режиме удержания клавишу могли уже отпустить (быстрое нажатие) — тогда не открываем
+            if (Settings.RadialTrigger == RadialTrigger.Hold && !Engine.IsHotkeyHeld) return;
+            _radialToken++;
+            // Флаг ставим до показа: если клавишу отпустят, пока окно открывается, хук уже пришлёт «выбор»
+            Engine.RadialOpen = true;
+            _radial.Open(Phrases, caret);
+            Engine.RadialOpen = _radial.IsOpen;
+            if (_radial.IsOpen && Settings.RadialTrigger == RadialTrigger.Hold && !Engine.IsHotkeyHeld) OnRadialCancel();
+        }
+
+        // Ждём позицию каретки (чтобы не закрыть строку с текстом), но не дольше 90 мс
+        _caret.Request(-1, (_, info) =>
+        {
+            if (!info.IsPassword) Engine.MarkFieldVerified();
+            caret = info.Precise ? info.Rect : null;
+            caretKnown = true;
+            TryOpen(false);
+        });
+        var timer = new DispatcherTimer(DispatcherPriority.Input, _ui) { Interval = TimeSpan.FromMilliseconds(delayed ? 140 : 90) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            minDelayPassed = true;
+            TryOpen(force: true);
+        };
+        timer.Start();
     }
 
     public void OnRadialCommit()
     {
+        _radialToken++;
         var phrase = _radial.Commit();
         Engine.RadialOpen = false;
         if (phrase is not null) InsertPhrase(phrase.Text);
@@ -286,6 +359,7 @@ internal sealed class AppController : IInputSink, IDisposable
 
     public void OnRadialCancel()
     {
+        _radialToken++;
         _radial.Cancel();
         Engine.RadialOpen = false;
     }
@@ -314,29 +388,54 @@ internal sealed class AppController : IInputSink, IDisposable
 
             bool clipboard = Settings.InsertMethod == InsertMethod.Clipboard ||
                              (Settings.InsertMethod == InsertMethod.Auto && text.Length > Settings.ClipboardThreshold);
-            if (clipboard) await PasteViaClipboard(text);
-            else TextInjector.Type(text, 0, Settings.NewlineAsShiftEnter);
+            if (!clipboard || !await PasteViaClipboard(text))
+                TextInjector.Type(text, 0, Settings.NewlineAsShiftEnter);
 
             Engine.NotifyInserted(text);
         }
         catch (Exception ex) { Log.Error("Ошибка вставки фразы", ex); }
     }
 
-    private static async Task PasteViaClipboard(string text)
+    /// <summary>
+    /// Вставка через буфер обмена с сохранением ВСЕГО прежнего содержимого (картинки, файлы, форматированный текст).
+    /// false — буфер занят другой программой: тогда фраза будет напечатана, а не вставлена старым содержимым.
+    /// </summary>
+    private static async Task<bool> PasteViaClipboard(string text)
     {
-        string? backup = null;
-        try { if (Clipboard.ContainsText()) backup = Clipboard.GetText(); } catch { /* буфер занят */ }
-        for (int attempt = 0; attempt < 5; attempt++)
+        DataObject? backup = null;
+        try
         {
-            try { Clipboard.SetDataObject(text, true); break; }
+            if (Clipboard.GetDataObject() is { } current)
+            {
+                backup = new DataObject();
+                foreach (var format in current.GetFormats(false))
+                {
+                    try { if (current.GetData(format, false) is { } data) backup.SetData(format, data, false); }
+                    catch { /* некоторые форматы нельзя скопировать — пропускаем */ }
+                }
+            }
+        }
+        catch { backup = null; }
+
+        bool set = false;
+        for (int attempt = 0; attempt < 5 && !set; attempt++)
+        {
+            try { Clipboard.SetDataObject(text, true); set = true; }
             catch { await Task.Delay(30); }
         }
+        if (!set) return false;
+
         TextInjector.CtrlV();
         await Task.Delay(400);
         if (backup is not null)
         {
-            try { Clipboard.SetDataObject(backup, true); } catch { /* ignore */ }
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                try { Clipboard.SetDataObject(backup, true); break; }
+                catch { await Task.Delay(30); }
+            }
         }
+        return true;
     }
 
     // ------------------------------------------------------------------ пауза / настройки
@@ -414,14 +513,23 @@ internal sealed class AppController : IInputSink, IDisposable
         };
     }
 
+    private volatile bool _dictLoaded, _dictSaveBlocked;
+
     public void SaveDictionary(bool sync)
     {
+        // До загрузки (или после неудачной загрузки) не сохраняем — иначе затёрли бы файл почти пустым словарём
+        if (!_dictLoaded || _dictSaveBlocked) return;
         var user = Prediction.User;
         if (!user.Dirty) return;
+        user.Prune(UserModel.NowMinutes());
         var text = user.Serialize();
         user.Dirty = false;
-        if (sync) Storage.WriteAtomic(Paths.UserDict, text);
-        else Task.Run(() => Storage.WriteAtomic(Paths.UserDict, text));
+        void Write()
+        {
+            if (!Storage.WriteAtomic(Paths.UserDict, text)) _ui.BeginInvoke(() => user.Dirty = true); // повторим позже
+        }
+        if (sync) Write();
+        else Task.Run(Write);
     }
 
     public void NotifyDictionaryChanged() => DictionaryChanged?.Invoke();
