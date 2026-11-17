@@ -496,9 +496,9 @@
 
                         <Grid>
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
                                 <RowDefinition Height="12" />
-                                <RowDefinition Height="*" MinHeight="200" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <Border Style="{StaticResource Card}" Margin="0">
                                 <DockPanel>
@@ -514,7 +514,7 @@
                                         <Button x:Name="ResetPhrasesButton" Style="{StaticResource Btn.Ghost}" Content="{DynamicResource S.P.Reset}" ToolTip="{DynamicResource S.P.ResetTip}"
                                                 Click="ResetPhrases_Click" HorizontalAlignment="Left" Margin="0,6,0,0" Foreground="{DynamicResource B.FgMuted}" />
                                     </StackPanel>
-                                    <ListBox x:Name="GroupList" ItemsSource="{Binding Groups}" SelectionChanged="GroupList_SelectionChanged" MaxHeight="190">
+                                    <ListBox x:Name="GroupList" ItemsSource="{Binding Groups}" SelectionChanged="GroupList_SelectionChanged">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <Grid t:Anim.Appear="True">
@@ -533,9 +533,10 @@
                             <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0" Padding="8">
                                 <DockPanel>
                                     <TextBlock DockPanel.Dock="Top" Style="{StaticResource T.Muted}" Text="{DynamicResource S.P.Preview}" HorizontalAlignment="Center" Margin="0,2,0,4" />
-                                    <!-- Превью уменьшено примерно вдвое — подписи в нём крупнее, чтобы оставались читаемыми -->
-                                    <Viewbox Stretch="Uniform">
-                                        <c:RadialView x:Name="Preview" InteractiveHover="True" TextBoost="1.2" Margin="4" />
+                                    <!-- Превью фиксированного размера (без «резиновой» раскладки) и без округления внутри масштаба;
+                                         подписи крупнее, чтобы оставались читаемыми -->
+                                    <Viewbox Width="264" Height="264" Stretch="Uniform" UseLayoutRounding="False" HorizontalAlignment="Center">
+                                        <c:RadialView x:Name="Preview" InteractiveHover="True" Lightweight="True" TextBoost="1.2" Margin="4" />
                                     </Viewbox>
                                 </DockPanel>
                             </Border>

@@ -214,6 +214,7 @@ internal partial class SettingsWindow : Window
         if (_currentSection == target) return;
         if (_currentSection is not null) _currentSection.Visibility = Visibility.Collapsed;
         _currentSection = target;
+        UiWatchdog.Context = "настройки: " + section;
         target.Visibility = Visibility.Visible;
         Anim.Play(target, 12);
 

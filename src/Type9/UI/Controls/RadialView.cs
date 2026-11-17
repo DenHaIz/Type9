@@ -37,6 +37,21 @@ public sealed class RadialView : Grid
     private RadialGradientBrush _hlBrush = new();
 
     private readonly BitmapCache _discCache = new() { SnapsToDevicePixels = true };
+    private readonly Ellipse _disc;
+
+    /// <summary>
+    /// Облегчённая отрисовка для превью в настройках: без размытой тени и кеша-текстуры. Внутри масштабирующего
+    /// Viewbox такая связка на некоторых видеодрайверах подвешивала отрисовку всего окна.
+    /// </summary>
+    public bool Lightweight
+    {
+        get => _disc.Effect is null;
+        set
+        {
+            _disc.Effect = value ? null : new DropShadowEffect { BlurRadius = 28, ShadowDepth = 4, Opacity = 0.4, Color = Colors.Black };
+            _disc.CacheMode = value ? null : _discCache;
+        }
+    }
     private Canvas _sectorLayer;
     private readonly Grid _content = new();
     private readonly TextBlock _title;
@@ -76,7 +91,7 @@ public sealed class RadialView : Grid
         Height = ViewSize;
         RenderTransformOrigin = new Point(0.5, 0.5);
 
-        var disc = new Ellipse
+        var disc = _disc = new Ellipse
         {
             Width = ViewSize, Height = ViewSize,
             Effect = new DropShadowEffect { BlurRadius = 28, ShadowDepth = 4, Opacity = 0.4, Color = Colors.Black },

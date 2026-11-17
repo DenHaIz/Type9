@@ -53,20 +53,29 @@ internal static class UiScale
     /// </summary>
     public static void PixelAlign(Window w)
     {
+        bool applying = false;
+        int applied = 0;
+        long windowStart = 0;
         void Apply()
         {
-            if (PresentationSource.FromVisual(w)?.CompositionTarget is not { } ct) return;
+            if (applying || PresentationSource.FromVisual(w)?.CompositionTarget is not { } ct) return;
             var m = ct.TransformToDevice;
             var want = new DpiScale(m.M11 * Current, m.M22 * Current);
             var cur = VisualTreeHelper.GetDpi(w);
             if (Math.Abs(cur.DpiScaleX - want.DpiScaleX) < 0.001 && Math.Abs(cur.DpiScaleY - want.DpiScaleY) < 0.001) return;
+            // Предохранитель: если система раз за разом возвращает свой DPI, не спорим с ней (не больше 5 раз за 2 с)
+            long now = Environment.TickCount64;
+            if (now - windowStart > 2000) { windowStart = now; applied = 0; }
+            if (++applied > 5) { Core.Log.Info("PixelAlign: DPI окна сбрасывается системой, выравнивание пропущено"); return; }
+            applying = true;
             try { VisualTreeHelper.SetRootDpi(w, want); }
             catch (Exception ex) { Core.Log.Error("SetRootDpi", ex); }
+            finally { applying = false; }
         }
         Action onScale = Apply;
         w.SourceInitialized += (_, _) => Apply();
         // Переезд на монитор с другим DPI: WPF выставит системный DPI — поправляем после него
-        w.DpiChanged += (_, _) => w.Dispatcher.BeginInvoke(Apply, System.Windows.Threading.DispatcherPriority.Loaded);
+        w.DpiChanged += (_, _) => w.Dispatcher.BeginInvoke(Apply, System.Windows.Threading.DispatcherPriority.Background);
         Changed += onScale;
         w.Closed += (_, _) => Changed -= onScale;
     }

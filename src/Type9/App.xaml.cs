@@ -47,7 +47,10 @@ public partial class App : Application
             var st = new AppSettings();
             ThemeManager.Init(Resources, st.Theme, st.Accent);
             Loc.Apply(st.Language, Resources);
-            var ctl = new AppController(Dispatcher, st, PhraseBook.CreateDefault(AppLanguage.Russian));
+            var snapPhrases = Environment.GetEnvironmentVariable("TYPE9_SNAPSHOT_PHRASES") is { } sp
+                ? Storage.Load(sp, JsonCtx.Default.PhraseBook, () => PhraseBook.CreateDefault(AppLanguage.Russian), out _)
+                : PhraseBook.CreateDefault(AppLanguage.Russian);
+            var ctl = new AppController(Dispatcher, st, snapPhrases);
             Dispatcher.BeginInvoke(async () =>
             {
                 try { await Snapshot.RunAsync(ctl, dir); }
@@ -98,6 +101,7 @@ public partial class App : Application
 
         _controller = new AppController(Dispatcher, settings, phrases);
         _controller.Start();
+        UiWatchdog.Start(Dispatcher);
         _instance.Listen(() => Dispatcher.BeginInvoke(() => _controller?.ShowSettings()));
 
         if (settings.Autostart) _controller.ApplyAutostart();

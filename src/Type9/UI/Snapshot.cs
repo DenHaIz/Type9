@@ -20,11 +20,33 @@ internal static class Snapshot
     public static async Task RunAsync(AppController app, string dir)
     {
         Directory.CreateDirectory(dir);
+        if (Environment.GetEnvironmentVariable("TYPE9_SNAPSHOT_SWEEP") == "1")
+        {
+            // Отладка: перебор размеров окна на разделе «Круговое меню» — ищем зацикливание раскладки
+            UiScale.Apply(int.TryParse(Environment.GetEnvironmentVariable("TYPE9_SNAPSHOT_SCALES"), out var sc) ? sc : 100);
+            var sw = new SettingsWindow(app) { Left = 40, Top = 40, ShowActivated = false, ShowInTaskbar = false };
+            sw.Show();
+            sw.Navigate("phrases");
+            await Settle();
+            sw.MinWidth = sw.MinHeight = 0;
+            using var log = new StreamWriter(Path.Combine(dir, "sweep.txt")) { AutoFlush = true };
+            for (int h = 480; h <= 900; h += 1)
+            for (int wd = 860; wd <= 1160; wd += 37)
+            {
+                log.WriteLine($"{wd}x{h}");
+                sw.Width = wd; sw.Height = h;
+                sw.UpdateLayout();
+                await Dispatcher.CurrentDispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+            }
+            log.WriteLine("done");
+            sw.Close();
+            return;
+        }
         var s = app.Settings;
         s.RadialHotkey = "RCtrl"; // чтобы на снимке было видно предупреждение о конфликте
         foreach (var lang in new[] { AppLanguage.Russian, AppLanguage.English })
         foreach (var theme in new[] { AppTheme.Dark, AppTheme.Light })
-        foreach (var scale in new[] { 100, 130 })
+        foreach (var scale in Environment.GetEnvironmentVariable("TYPE9_SNAPSHOT_SCALES")?.Split(",").Select(int.Parse).ToArray() ?? [100, 130])
         {
             if (scale != 100 && theme == AppTheme.Light) continue;
             s.Language = lang;
@@ -35,8 +57,10 @@ internal static class Snapshot
             UiScale.Apply(scale);
             string tag = $"{(lang == AppLanguage.Russian ? "ru" : "en")}-{theme.ToString().ToLowerInvariant()}-{scale}";
 
-            var w = new SettingsWindow(app) { Left = -20000, Top = -20000, ShowActivated = false, ShowInTaskbar = false };
+            bool onScreen = Environment.GetEnvironmentVariable("TYPE9_SNAPSHOT_ONSCREEN") == "1";
+            var w = new SettingsWindow(app) { Left = onScreen ? 40 : -20000, Top = onScreen ? 40 : -20000, ShowActivated = false, ShowInTaskbar = false };
             w.Show();
+            if (int.TryParse(Environment.GetEnvironmentVariable("TYPE9_SNAPSHOT_H"), out var forcedH)) { w.MinHeight = 0; w.Height = forcedH; }
             foreach (var section in new[] { "general", "phrases", "abbrev", "dict", "excl", "about" })
             {
                 w.Navigate(section);
