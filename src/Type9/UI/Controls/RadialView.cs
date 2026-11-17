@@ -17,7 +17,7 @@ namespace Type9.UI.Controls;
 public sealed class RadialView : Grid
 {
     public const double ViewSize = 440;
-    private const double ROut = 206, RIn = 84, Gap = 6, Push = 7;
+    private const double ROut = 206, RIn = 84, Gap = 6;
     private static readonly Point C = new(ViewSize / 2, ViewSize / 2);
 
     private sealed class Sector
@@ -26,11 +26,10 @@ public sealed class RadialView : Grid
         public required SolidColorBrush Fill;
         public required SolidColorBrush LabelBrush;
         public required SolidColorBrush NumberBrush;
-        public required TranslateTransform Shift;
         public required ScaleTransform Scale;
-        public required double Mid;
     }
 
+    private readonly BitmapCache _discCache = new() { SnapsToDevicePixels = true };
     private Canvas _sectorLayer;
     private readonly Grid _content = new();
     private readonly TextBlock _title;
@@ -40,6 +39,22 @@ public sealed class RadialView : Grid
     private readonly List<Sector> _sectors = [];
     private PhraseGroup? _group;
     private int _selected = -1;
+
+    private double _textBoost = 1;
+
+    /// <summary>Увеличение текста — для уменьшенного превью в настройках, чтобы подписи оставались читаемыми.</summary>
+    public double TextBoost
+    {
+        get => _textBoost;
+        set
+        {
+            _textBoost = Math.Clamp(value, 1, 2);
+            _title.FontSize = 12 * _textBoost;
+            _title.MaxWidth = _preview.MaxWidth = 140;
+            _preview.FontSize = 12 * _textBoost;
+            _preview.MaxHeight = 66 * _textBoost;
+        }
+    }
 
     /// <summary>Подсветка под курсором мыши (для превью в настройках).</summary>
     public bool InteractiveHover { get; set; }
@@ -63,7 +78,7 @@ public sealed class RadialView : Grid
         disc.SetResourceReference(Shape.StrokeProperty, "B.Line");
         disc.StrokeThickness = 1;
         // Тень считается один раз и хранится как текстура — анимации не пересчитывают размытие каждый кадр
-        disc.CacheMode = new BitmapCache { SnapsToDevicePixels = true };
+        disc.CacheMode = _discCache;
         Children.Add(disc);
 
         _sectorLayer = NewLayer();
@@ -76,7 +91,7 @@ public sealed class RadialView : Grid
         _hubRing.SetResourceReference(Shape.StrokeProperty, "B.SectorLine");
         Children.Add(_hubRing);
 
-        _title = new TextBlock { FontSize = 11, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 120 };
+        _title = new TextBlock { FontSize = 12, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 120 };
         _title.SetResourceReference(TextBlock.ForegroundProperty, "B.AccentFg");
         _preview = new TextBlock
         {
@@ -147,14 +162,13 @@ public sealed class RadialView : Grid
         var fill = new SolidColorBrush(theme.sector);
         var labelBrush = new SolidColorBrush(theme.fg);
         var numberBrush = new SolidColorBrush(theme.muted);
-        var shift = new TranslateTransform();
         var scale = new ScaleTransform(1, 1);
 
         var host = new Canvas
         {
             Width = ViewSize, Height = ViewSize,
             RenderTransformOrigin = new Point(0.5, 0.5),
-            RenderTransform = new TransformGroup { Children = { scale, shift } },
+            RenderTransform = scale,
         };
 
         var path = new Path { Data = RadialGeometry.Sector(C, RIn, ROut, i, n, Gap), Fill = fill, StrokeThickness = 1 };
@@ -165,21 +179,21 @@ public sealed class RadialView : Grid
         double span = 360.0 / n;
         double rLabel = (RIn + ROut) / 2 + 4;
         double chord = n == 1 ? 200 : 2 * rLabel * Math.Sin(Math.Min(span, 120) * Math.PI / 360);
-        double maxW = Math.Clamp(chord * 0.86, 70, 150);
+        double maxW = Math.Clamp(chord * (_textBoost > 1 ? 1.0 : 0.86), 70, 150 * _textBoost);
 
         var label = new TextBlock
         {
-            Text = phrase.Caption, Foreground = labelBrush, FontSize = 13, FontWeight = FontWeights.Medium,
+            Text = phrase.Caption, Foreground = labelBrush, FontSize = 13 * _textBoost, FontWeight = FontWeights.Medium,
             TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
-            MaxWidth = maxW, MaxHeight = 54, IsHitTestVisible = false,
+            MaxWidth = maxW, MaxHeight = 54 * _textBoost, IsHitTestVisible = false,
         };
-        label.Measure(new Size(maxW, 54));
+        label.Measure(new Size(maxW, 54 * _textBoost));
         var lp = n == 1 ? new Point(C.X, C.Y - rLabel) : RadialGeometry.At(C, rLabel, mid);
         Canvas.SetLeft(label, lp.X - label.DesiredSize.Width / 2);
         Canvas.SetTop(label, lp.Y - label.DesiredSize.Height / 2);
         host.Children.Add(label);
 
-        var num = new TextBlock { Text = (i + 1).ToString(), Foreground = numberBrush, FontSize = 10.5, FontWeight = FontWeights.SemiBold, IsHitTestVisible = false };
+        var num = new TextBlock { Text = (i + 1).ToString(), Foreground = numberBrush, FontSize = 11.5 * (1 + (_textBoost - 1) / 2), FontWeight = FontWeights.SemiBold, IsHitTestVisible = false };
         num.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         // Номер — в «переднем» углу сектора у внешнего края, чтобы не пересекаться с подписью
         double numAngle = n == 1 ? 0 : mid - span / 2 + Math.Min(span / 2 - 4, 9);
@@ -189,7 +203,7 @@ public sealed class RadialView : Grid
         host.Children.Add(num);
 
         _sectorLayer.Children.Add(host);
-        return new Sector { Host = host, Fill = fill, LabelBrush = labelBrush, NumberBrush = numberBrush, Shift = shift, Scale = scale, Mid = mid };
+        return new Sector { Host = host, Fill = fill, LabelBrush = labelBrush, NumberBrush = numberBrush, Scale = scale };
     }
 
     private (Color sector, Color fg, Color muted, Color accent, Color onAccent) Palette() => (
@@ -221,13 +235,12 @@ public sealed class RadialView : Grid
     }
 
     private static readonly Duration SelectIn = TimeSpan.FromMilliseconds(70);
-    private static readonly Duration SelectOut = TimeSpan.FromMilliseconds(120);
-    private static readonly Duration PushIn = TimeSpan.FromMilliseconds(110);
+    private static readonly Duration SelectOut = TimeSpan.FromMilliseconds(90);
 
     /// <summary>
     /// Подсветка сектора. Выбор должен ощущаться мгновенным: цвет сразу прыгает на 75% пути к акценту
-    /// и за 4 кадра доходит до конца, подпись перекрашивается сразу, выдвижение — быстрая кривая без «пружины».
-    /// Снятие выделения — чуть дольше и мягче. Recolor (смена темы) передаёт свою длительность.
+    /// и за 4 кадра доходит до конца, подпись перекрашивается сразу. Сектор не сдвигается: при быстром
+    /// ведении мыши по кругу движение отставало бы от курсора. Recolor (смена темы) передаёт свою длительность.
     /// </summary>
     private static void ApplyStyle(Sector s, bool on, (Color sector, Color fg, Color muted, Color accent, Color onAccent) c, Duration? themeDuration = null)
     {
@@ -250,11 +263,6 @@ public sealed class RadialView : Grid
         s.LabelBrush.Color = on ? c.onAccent : c.fg;
         s.NumberBrush.BeginAnimation(SolidColorBrush.ColorProperty, null);
         s.NumberBrush.Color = on ? c.onAccent : c.muted;
-
-        var target = on ? RadialGeometry.At(new Point(0, 0), Push, s.Mid) : new Point(0, 0);
-        var dur = on ? PushIn : SelectOut;
-        s.Shift.Animate(TranslateTransform.XProperty, target.X, dur, Motion.EaseOutStrong);
-        s.Shift.Animate(TranslateTransform.YProperty, target.Y, dur, Motion.EaseOutStrong);
     }
     private void Recolor()
     {
@@ -266,6 +274,8 @@ public sealed class RadialView : Grid
     /// <summary>Появление: диск «раскрывается», сектора разлетаются веером.</summary>
     public void PlayOpen()
     {
+        // Кеш диска — в реальном разрешении (DPI экрана × масштаб интерфейса), иначе край и тень «пиксельные»
+        _discCache.RenderAtScale = VisualTreeHelper.GetDpi(this).DpiScaleX;
         this.Animate(OpacityProperty, 1, Motion.Normal, Motion.EaseOut, 0);
         var scale = RenderTransform as ScaleTransform ?? (ScaleTransform)(RenderTransform = new ScaleTransform(1, 1));
         scale.Animate(ScaleTransform.ScaleXProperty, 1, Motion.Normal, Motion.Spring, 0.86);

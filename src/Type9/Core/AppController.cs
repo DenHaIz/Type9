@@ -235,7 +235,7 @@ internal sealed class AppController : IInputSink, IDisposable
     // ------------------------------------------------------------------ подсказки
 
     private PredictionOptions Options => new(Settings.MinPrefix, Settings.MaxSuggestions, Settings.AddSpaceAfterWord,
-        Settings.NextWordPrediction, Settings.NextWordMinCount, Settings.SuggestLanguage);
+        Settings.NextWordPrediction, Settings.NextWordMinCount, Settings.SuggestLanguage, Settings.GreetingComma);
 
     private DispatcherTimer? _learnIdleTimer;
 

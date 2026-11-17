@@ -29,6 +29,7 @@ public sealed class AppSettings
     public int MaxSuggestions { get; set; } = 3;
     public bool AddSpaceAfterWord { get; set; } = true;
     public bool SmartPunctuation { get; set; } = true;
+    public bool GreetingComma { get; set; } = true;
     public bool NextWordPrediction { get; set; } = true;
     public int NextWordMinCount { get; set; } = 2;
     public bool LearnEnabled { get; set; } = true;

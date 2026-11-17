@@ -18,6 +18,7 @@ internal sealed class RadialMenuWindow : Window
     private const double ShadowMargin = 30; // поле под тень вокруг колеса (DIP)
 
     private readonly RadialView _view = new() { Opacity = 0 };
+    private readonly ScaleTransform _scale = new(1, 1);
     private IntPtr _hwnd;
     private Win32.POINT _center;
     private Win32.POINT? _restoreCursor;
@@ -38,13 +39,16 @@ internal sealed class RadialMenuWindow : Window
         Topmost = true;
         ResizeMode = ResizeMode.NoResize;
         Focusable = false;
-        FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI");
-        Content = _view;
+        FontFamily = new FontFamily("Segoe UI");
+        // Всё содержимое (вместе с полем под тень) — внутри масштаба, чтобы округление совпадало с пикселями
+        _view.Margin = new Thickness(ShadowMargin);
         _view.HorizontalAlignment = HorizontalAlignment.Center;
         _view.VerticalAlignment = VerticalAlignment.Center;
         _view.RenderTransform = new ScaleTransform(1, 1);
+        Content = new System.Windows.Controls.Grid { LayoutTransform = _scale, Children = { _view } };
         ApplyScale();
         UiScale.Changed += ApplyScale;
+        UiScale.PixelAlign(this);
         SourceInitialized += (_, _) =>
         {
             _hwnd = new WindowInteropHelper(this).Handle;
@@ -55,7 +59,7 @@ internal sealed class RadialMenuWindow : Window
     private void ApplyScale()
     {
         double s = UiScale.Current;
-        _view.LayoutTransform = new ScaleTransform(s, s);
+        _scale.ScaleX = _scale.ScaleY = s;
         Width = (RadialView.ViewSize + 2 * ShadowMargin) * s;
         Height = (RadialView.ViewSize + 2 * ShadowMargin) * s;
     }

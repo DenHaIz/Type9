@@ -1,7 +1,7 @@
 ﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <FontFamily x:Key="F.Ui">Segoe UI Variable Text, Segoe UI</FontFamily>
+    <FontFamily x:Key="F.Ui">Segoe UI</FontFamily>
     <FontFamily x:Key="F.Icons">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
     <Duration x:Key="D.Fast">0:0:0.09</Duration>
     <Duration x:Key="D.Normal">0:0:0.14</Duration>
@@ -544,7 +544,7 @@
                             </Grid.ColumnDefinitions>
                             <ContentPresenter ContentSource="Icon" VerticalAlignment="Center" HorizontalAlignment="Left" />
                             <ContentPresenter Grid.Column="1" ContentSource="Header" VerticalAlignment="Center" RecognizesAccessKey="True" />
-                            <TextBlock Grid.Column="2" Text="{TemplateBinding InputGestureText}" Foreground="{DynamicResource B.FgMuted}" FontSize="11.5"
+                            <TextBlock Grid.Column="2" Text="{TemplateBinding InputGestureText}" Foreground="{DynamicResource B.FgMuted}" FontSize="12"
                                        VerticalAlignment="Center" Margin="16,0,0,0" />
                         </Grid>
                     </Grid>

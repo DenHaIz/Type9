@@ -43,14 +43,14 @@ public class ModelTests(ITestOutputHelper output)
     [Theory]
     [InlineData("я живу в мос", "москве")]
     [InlineData("спасибо за пом", "помощь")]
-    [InlineData("добрый д", "день")]
+    [InlineData("добрый д", "день,")]
     [InlineData("с уваж", "уважением")]
     public void ContextCompletions(string text, string expected) =>
         Assert.Contains(expected, Words(Engine(), text));
 
     [Fact]
     public void NextWordAfterSpace() =>
-        Assert.Contains("день", Words(Engine(), "добрый ", minPrefix: 0));
+        Assert.Contains("день,", Words(Engine(), "добрый ", minPrefix: 0));
 
     [Fact]
     public void RussianModeHidesEnglish()

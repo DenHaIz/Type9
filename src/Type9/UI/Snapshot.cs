@@ -89,7 +89,7 @@ internal static class Snapshot
 
     private static void Save(FrameworkElement el, string path, Color? background = null)
     {
-        double dpi = 96 * VisualTreeHelper.GetDpi(el).DpiScaleX;
+        double dpi = 96 * UiScale.DeviceScale(el);
         int w = (int)Math.Ceiling(el.ActualWidth * dpi / 96), h = (int)Math.Ceiling(el.ActualHeight * dpi / 96);
         if (w <= 0 || h <= 0) return;
         var rtb = new RenderTargetBitmap(w, h, dpi, dpi, PixelFormats.Pbgra32);

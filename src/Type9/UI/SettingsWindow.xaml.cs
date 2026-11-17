@@ -33,6 +33,7 @@ internal partial class SettingsWindow : Window
     {
         _app = app;
         InitializeComponent();
+        UiScale.PixelAlign(this);
         DataContext = app.Settings;
         SecPhrases.DataContext = app.Phrases;
         SecAbbrev.DataContext = app.Phrases;

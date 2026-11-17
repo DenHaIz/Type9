@@ -20,6 +20,7 @@ internal sealed class SuggestionPopup : Window
     private readonly Grid _root;
     private readonly TranslateTransform _rootShift = new();
     private readonly ScaleTransform _scale = new(1, 1);
+    private readonly BitmapCache _shadowCache = new();
     private readonly StackPanel _items = new();
     private readonly Border _highlight;
     private readonly TranslateTransform _highlightShift = new();
@@ -44,13 +45,13 @@ internal sealed class SuggestionPopup : Window
         ResizeMode = ResizeMode.NoResize;
         SizeToContent = SizeToContent.WidthAndHeight;
         Focusable = false;
-        FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI");
+        FontFamily = new FontFamily("Segoe UI");
 
         var shadow = new Border
         {
             CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1),
             Effect = new DropShadowEffect { BlurRadius = 18, ShadowDepth = 3, Opacity = 0.35, Color = Colors.Black },
-            CacheMode = new BitmapCache(), // тень не пересчитывается при анимации появления
+            CacheMode = _shadowCache, // тень не пересчитывается при анимации появления
         };
         shadow.SetResourceReference(Border.BackgroundProperty, "B.Surface");
         shadow.SetResourceReference(Border.BorderBrushProperty, "B.Line");
@@ -70,7 +71,7 @@ internal sealed class SuggestionPopup : Window
         list.Children.Add(_highlight);
         list.Children.Add(_items);
 
-        _hint = new TextBlock { FontSize = 10.5, Margin = new Thickness(12, 0, 12, 6) };
+        _hint = new TextBlock { FontSize = 11.5, Margin = new Thickness(12, 0, 12, 6) };
         _hint.SetResourceReference(TextBlock.TextProperty, "S.Pop.Hint");
         _hint.SetResourceReference(TextBlock.ForegroundProperty, "B.FgMuted");
 
@@ -78,12 +79,14 @@ internal sealed class SuggestionPopup : Window
         stack.Children.Add(list);
         stack.Children.Add(_hint);
 
-        _root = new Grid { Margin = new Thickness(ShadowMargin), RenderTransform = _rootShift, Opacity = 0, LayoutTransform = _scale };
+        _root = new Grid { Margin = new Thickness(ShadowMargin), RenderTransform = _rootShift, Opacity = 0 };
         UiScale.AnimateTo(_scale, false);
         UiScale.Changed += () => UiScale.AnimateTo(_scale, false);
         _root.Children.Add(shadow);
         _root.Children.Add(stack);
-        Content = _root;
+        // Масштаб — на самом внешнем элементе (вместе с полем под тень): округление совпадает с пикселями
+        Content = new Grid { LayoutTransform = _scale, Children = { _root } };
+        UiScale.PixelAlign(this);
 
         SourceInitialized += (_, _) =>
         {
@@ -125,11 +128,9 @@ internal sealed class SuggestionPopup : Window
         text.Inlines.Add(rest);
         row.Children.Add(text);
 
-        string badge = index == 0 ? "Tab" : (index + 1).ToString();
-        if (s.Kind == SuggestionKind.Abbreviation) badge = "Tab ⇢";
         var tag = new Border { CornerRadius = new CornerRadius(4), Padding = new Thickness(6, 1, 6, 2), Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, BorderThickness = new Thickness(1) };
         tag.SetResourceReference(Border.BorderBrushProperty, "B.Line");
-        var tagText = new TextBlock { Text = badge, FontSize = 10.5 };
+        var tagText = new TextBlock { Text = Badge(index), FontSize = 11.5 };
         tagText.SetResourceReference(TextBlock.ForegroundProperty, "B.FgMuted");
         tag.Child = tagText;
         tag.Tag = "badge";
@@ -161,9 +162,13 @@ internal sealed class SuggestionPopup : Window
         for (int i = 0; i < _items.Children.Count; i++)
         {
             if (_items.Children[i] is Grid g && g.Children.OfType<Border>().FirstOrDefault(b => "badge".Equals(b.Tag)) is { Child: TextBlock tb })
-                tb.Text = _current[i].Kind == SuggestionKind.Abbreviation ? "Tab ⇢" : i == _selected ? "Tab" : (i + 1).ToString();
+                tb.Text = Badge(i);
         }
     }
+
+    /// <summary>Клавиша варианта: у выбранного — Tab, у остальных — Tab+номер.</summary>
+    private string Badge(int i) =>
+        i != _selected ? $"Tab+{i + 1}" : _current[i].Kind == SuggestionKind.Abbreviation ? "Tab ⇢" : "Tab";
 
     /// <summary>Показывает плашку под (или над) кареткой. Координаты — физические пиксели экрана.</summary>
     public void ShowAt(CaretInfo caret, bool fixedCorner)
@@ -182,9 +187,11 @@ internal sealed class SuggestionPopup : Window
 
         UpdateLayout();
         if (_hwnd == IntPtr.Zero) return;
-        double scale = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        // Текстура тени — в разрешении экрана с учётом масштаба интерфейса (иначе на 125–150% она размыта)
+        _shadowCache.RenderAtScale = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        double scale = UiScale.DeviceScale(this);
         int w = (int)Math.Ceiling(ActualWidth * scale), h = (int)Math.Ceiling(ActualHeight * scale);
-        int m = (int)(ShadowMargin * scale);
+        int m = (int)(ShadowMargin * UiScale.Current * scale);
 
         var anchorX = caret.Rect.Left;
         var anchorY = caret.Rect.Bottom;

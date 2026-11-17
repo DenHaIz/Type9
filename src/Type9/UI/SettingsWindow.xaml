@@ -87,11 +87,12 @@
     </Window.Resources>
 
     <Border x:Name="Frame" Background="{DynamicResource B.Bg}" BorderBrush="{DynamicResource B.Line}" BorderThickness="1" ClipToBounds="True">
+      <!-- Масштаб интерфейса — на внешнем элементе: вся вёрстка округляется в одной сетке (см. UiScale.PixelAlign) -->
+      <Border.LayoutTransform>
+          <ScaleTransform x:Name="RootScale" ScaleX="1" ScaleY="1" />
+      </Border.LayoutTransform>
       <Grid>
         <Grid x:Name="RootGrid">
-            <Grid.LayoutTransform>
-                <ScaleTransform x:Name="RootScale" ScaleX="1" ScaleY="1" />
-            </Grid.LayoutTransform>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="232" />
                 <ColumnDefinition Width="*" />
@@ -104,7 +105,7 @@
                         <Image x:Name="NavLogo" Width="30" Height="30" VerticalAlignment="Center" />
                         <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
                             <TextBlock Text="Type9" FontSize="16" FontWeight="SemiBold" />
-                            <TextBlock x:Name="VersionText" Style="{StaticResource T.Muted}" FontSize="11" />
+                            <TextBlock x:Name="VersionText" Style="{StaticResource T.Muted}" FontSize="12" />
                         </StackPanel>
                     </StackPanel>
 
@@ -114,7 +115,7 @@
                                 <Ellipse x:Name="StatusDot" Width="8" Height="8" Margin="0,0,8,0" VerticalAlignment="Center" />
                                 <TextBlock x:Name="StatusText" FontSize="12.5" FontWeight="Medium" />
                             </StackPanel>
-                            <TextBlock x:Name="StatusHint" Style="{StaticResource T.Muted}" FontSize="11" Margin="16,3,0,8" />
+                            <TextBlock x:Name="StatusHint" Style="{StaticResource T.Muted}" FontSize="12" Margin="16,3,0,8" />
                             <Button x:Name="PauseButton" Click="PauseButton_Click" HorizontalAlignment="Stretch" Padding="10,6" />
                         </StackPanel>
                     </Border>
@@ -265,6 +266,12 @@
                                         <StackPanel>
                                             <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.SmartPunct}" />
                                             <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.SmartPunctHint}" />
+                                        </StackPanel>
+                                    </CheckBox>
+                                    <CheckBox IsChecked="{Binding GreetingComma}" Margin="0,0,0,14">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.GreetingComma}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.GreetingCommaHint}" />
                                         </StackPanel>
                                     </CheckBox>
                                     <CheckBox IsChecked="{Binding LearnEnabled}" Margin="0,0,0,14">
@@ -482,16 +489,16 @@
                     <!-- ============ КРУГОВОЕ МЕНЮ ============ -->
                     <Grid x:Name="SecPhrases" Tag="phrases" Visibility="Collapsed" Margin="32,8,28,24">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="280" />
+                            <ColumnDefinition Width="300" />
                             <ColumnDefinition Width="16" />
                             <ColumnDefinition Width="*" MinWidth="320" />
                         </Grid.ColumnDefinitions>
 
                         <Grid>
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="*" MinHeight="150" />
-                                <RowDefinition Height="12" />
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="12" />
+                                <RowDefinition Height="*" MinHeight="200" />
                             </Grid.RowDefinitions>
                             <Border Style="{StaticResource Card}" Margin="0">
                                 <DockPanel>
@@ -507,7 +514,7 @@
                                         <Button x:Name="ResetPhrasesButton" Style="{StaticResource Btn.Ghost}" Content="{DynamicResource S.P.Reset}" ToolTip="{DynamicResource S.P.ResetTip}"
                                                 Click="ResetPhrases_Click" HorizontalAlignment="Left" Margin="0,6,0,0" Foreground="{DynamicResource B.FgMuted}" />
                                     </StackPanel>
-                                    <ListBox x:Name="GroupList" ItemsSource="{Binding Groups}" SelectionChanged="GroupList_SelectionChanged">
+                                    <ListBox x:Name="GroupList" ItemsSource="{Binding Groups}" SelectionChanged="GroupList_SelectionChanged" MaxHeight="190">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <Grid t:Anim.Appear="True">
@@ -524,12 +531,13 @@
                                 </DockPanel>
                             </Border>
                             <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0" Padding="8">
-                                <StackPanel>
-                                    <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.P.Preview}" HorizontalAlignment="Center" Margin="0,2,0,4" />
-                                    <Viewbox Height="220" Stretch="Uniform">
-                                        <c:RadialView x:Name="Preview" InteractiveHover="True" Margin="10" />
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource T.Muted}" Text="{DynamicResource S.P.Preview}" HorizontalAlignment="Center" Margin="0,2,0,4" />
+                                    <!-- Превью уменьшено примерно вдвое — подписи в нём крупнее, чтобы оставались читаемыми -->
+                                    <Viewbox Stretch="Uniform">
+                                        <c:RadialView x:Name="Preview" InteractiveHover="True" TextBoost="1.2" Margin="4" />
                                     </Viewbox>
-                                </StackPanel>
+                                </DockPanel>
                             </Border>
                         </Grid>
 
@@ -556,7 +564,7 @@
                                                         </Grid.ColumnDefinitions>
                                                         <Border Width="22" Height="22" CornerRadius="11" Background="{DynamicResource B.AccentSoft}" VerticalAlignment="Top" Margin="0,5,0,0">
                                                             <TextBlock Text="{Binding (ItemsControl.AlternationIndex), RelativeSource={RelativeSource AncestorType=ContentPresenter}, Converter={x:Static c:IndexPlusOne.Instance}}"
-                                                                       FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource B.AccentFg}" />
+                                                                       FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource B.AccentFg}" />
                                                         </Border>
                                                         <StackPanel Grid.Column="1">
                                                             <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}" Tag="{DynamicResource S.P.TextHint}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="34" MaxHeight="120"

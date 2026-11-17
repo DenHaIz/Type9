@@ -45,6 +45,36 @@ internal static class UiScale
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// Масштаб через LayoutTransform сдвигает округление раскладки с сетки пикселей экрана: при 90/115/130%
+    /// (и при масштабе Windows 125/150%) рамки в 1 пиксель «плывут», текст мылится. Сообщаем окну DPI с учётом
+    /// нашего масштаба — WPF округляет размеры и растеризует текст и кеши сразу под реальные пиксели.
+    /// Всё содержимое окна должно лежать внутри масштабирующего элемента.
+    /// </summary>
+    public static void PixelAlign(Window w)
+    {
+        void Apply()
+        {
+            if (PresentationSource.FromVisual(w)?.CompositionTarget is not { } ct) return;
+            var m = ct.TransformToDevice;
+            var want = new DpiScale(m.M11 * Current, m.M22 * Current);
+            var cur = VisualTreeHelper.GetDpi(w);
+            if (Math.Abs(cur.DpiScaleX - want.DpiScaleX) < 0.001 && Math.Abs(cur.DpiScaleY - want.DpiScaleY) < 0.001) return;
+            try { VisualTreeHelper.SetRootDpi(w, want); }
+            catch (Exception ex) { Core.Log.Error("SetRootDpi", ex); }
+        }
+        Action onScale = Apply;
+        w.SourceInitialized += (_, _) => Apply();
+        // Переезд на монитор с другим DPI: WPF выставит системный DPI — поправляем после него
+        w.DpiChanged += (_, _) => w.Dispatcher.BeginInvoke(Apply, System.Windows.Threading.DispatcherPriority.Loaded);
+        Changed += onScale;
+        w.Closed += (_, _) => Changed -= onScale;
+    }
+
+    /// <summary>Реальное число физических пикселей на DIP для окна (без поправки PixelAlign).</summary>
+    public static double DeviceScale(Visual v) =>
+        PresentationSource.FromVisual(v)?.CompositionTarget?.TransformToDevice.M11 ?? VisualTreeHelper.GetDpi(v).DpiScaleX;
+
     /// <summary>Плавно анимирует масштабирующую трансформацию к текущему значению.</summary>
     public static void AnimateTo(ScaleTransform t, bool animate = true)
     {

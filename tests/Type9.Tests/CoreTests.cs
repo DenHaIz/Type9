@@ -112,7 +112,7 @@ public class PredictionTests
     public void CompletesFromBaseDictionary()
     {
         var r = Engine().Predict(new TypingContext("здр", null, null, false), new PredictionOptions());
-        Assert.Contains(r, s => s.Display == "здравствуйте");
+        Assert.Contains(r, s => s.Display == "здравствуйте,"); // приветствие в начале — с запятой
     }
 
     [Fact]

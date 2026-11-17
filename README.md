@@ -12,15 +12,16 @@
 <img src="docs/screenshots/suggestions-dark.png" width="260" alt="Подсказки">
 </p>
 
-<p align="center"><b>Текущая версия: 0.3</b> · <a href="https://github.com/DenHaIz/Type9/releases/latest">Скачать Type9.exe</a></p>
+<p align="center"><b>Текущая версия: 0.3.1</b> · <a href="https://github.com/DenHaIz/Type9/releases/latest">Скачать Type9.exe</a></p>
 
 ## Возможности
 
-- **Автодополнение везде** — Блокнот, браузеры, мессенджеры, Office. Подсказка появляется у курсора ввода: `Tab` — вставить, `↑/↓` — выбрать вариант, `Esc` — скрыть.
+- **Автодополнение везде** — Блокнот, браузеры, мессенджеры, Office. Подсказка появляется у курсора ввода: `Tab` — вставить, `Tab`+`2`/`3` — вставить второй/третий вариант, `↑/↓` или колесо мыши над подсказкой — выбрать вариант, `Esc` — скрыть.
 - **Понимает контекст.** Встроенный словарь на 150 000 русских и 100 000 английских слов с моделью пар и троек слов и согласованием окончаний: «в этом мес…» → **месте**, «с колл…» → **коллегами**, «по этому воп…» → **вопросу**.
+- **Запятая после приветствия** — «Здр» + `Tab` → «Здравствуйте, », «добрый д» + `Tab` → «добрый день, ». Наберите сразу `!` — получится «Здравствуйте!». Отключается в настройках.
 - **Следующее слово по смыслу** — в режиме «Подсказывать после: пробела» предлагает слово ещё до первой буквы («добрый ␣» → «день»). `Tab`, `Tab`, `Tab` — и привычная фраза готова.
 - **Учится на вашем тексте** — запоминает ваши слова и обороты, как только вы перешли к следующему слову или сделали паузу. Исправленные опечатки, адреса, почта и пароли не запоминаются. Можно сразу «скормить» программе типовые письма.
-- **Круговое меню фраз** (как buy-menu в CS:GO или chat wheel в Dota 2): зажмите `Alt+Q`, наведите мышь на фразу, отпустите — текст вставлен. Цифры `1–8` — мгновенный выбор, колесо мыши или `←/→` — другая группа. Готовые деловые фразы: приветствия, благодарность, ответы, просьбы, извинения, завершение.
+- **Круговое меню фраз** (как buy-menu в CS:GO или chat wheel в Dota 2): зажмите `Alt+Q`, наведите мышь на фразу, отпустите — текст вставлен. Цифры `1–8` — мгновенный выбор, колесо мыши или `←/→` — другая группа. Готовые деловые фразы в трёх группах: приветствия, ответы, завершение.
 - **Любая клавиша для меню** — сочетание или одна клавиша: F1–F24, CapsLock, правый Ctrl/Alt, кнопка мыши. Если выбранная клавиша мешает стандартным сочетаниям (Ctrl+C, F5, «Назад» на мыши), настройки предупредят.
 - **Несколько мониторов** — меню открывается целиком на мониторе под курсором, упирается в его границы и не перекрывает строку, в которой вы печатаете.
 - **Сокращения** — `здр` → «Здравствуйте, », `бсп` → «Большое спасибо! », `суваж` → «С уважением,⏎». Подстановки `{date}`, `{time}`, `{clipboard}`.
@@ -44,7 +45,8 @@
 | Клавиша | Действие |
 |---|---|
 | `Tab` | вставить подсказку |
-| `↑` / `↓` | выбрать другой вариант |
+| `Tab` + `1`–`9` | вставить вариант с этим номером (держите Tab и нажмите цифру) |
+| `↑` / `↓`, колесо мыши над подсказкой | выбрать другой вариант |
 | `Esc` | скрыть подсказку |
 | `Alt+Q` (удерживать) | круговое меню: навести и отпустить |
 | `1`–`8` | мгновенный выбор фразы в меню |
@@ -93,10 +95,10 @@ dotnet test Type9.sln          # тесты
 
 **Type9** is a Windows tray app:
 
-- **Word completion in any text field** with a popup at the text cursor (`Tab` inserts, `↑/↓` chooses, `Esc` hides).
+- **Word completion in any text field** with a popup at the text cursor (`Tab` inserts, `Tab`+digit inserts option N, `↑/↓` or the mouse wheel chooses, `Esc` hides); a comma is added after greetings ("Hello,").
 - **Context-aware**: built-in 150k Russian / 100k English language models (word pairs/triples + Russian case agreement), **next-word prediction right after a space**, and learning from your own writing (fixed typos, URLs, e-mails and passwords are never learned).
 - **Phrase wheel** (CS:GO buy menu / Dota 2 chat wheel style): hold `Alt+Q`, point, release. Can be bound to a single key or mouse button, with warnings about conflicting shortcuts. Multi-monitor aware: stays on the cursor's monitor and never covers the line you type in.
-- Abbreviations, suggestion language (Russian by default), dark & light themes, RU/EN UI, auto UI scale, **auto-update from GitHub** with SHA-256 verification (your dictionary is kept).
+- Abbreviations, suggestion language (Russian by default), dark & light themes, RU/EN UI, crisp auto UI scale on any DPI, **auto-update from GitHub** with SHA-256 verification (your dictionary is kept).
 
 Download **`Type9.exe`** from [Releases](https://github.com/DenHaIz/Type9/releases) — a single self-contained file.
 

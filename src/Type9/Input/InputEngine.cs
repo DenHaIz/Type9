@@ -66,6 +66,13 @@ internal sealed class InputEngine : IDisposable
 
     private bool _capsOn;
     private bool _autoSpace;
+    private bool _autoComma;   // запятая, поставленная нами после приветствия (Tab по «Здравствуйте»)
+    private int _wheelAcc;     // накопленная дельта колеса над подсказкой
+
+    /// <summary>Последняя вставка по Tab, пока Tab зажат: Tab+цифра заменяет её другим вариантом.</summary>
+    private sealed record TabAccept(SuggestionSnapshot Snap, int Index, string Word);
+    private TabAccept? _tabAccept;
+    private bool _tabDown;
     private bool _hotkeyHeld;
     private int _hotkeyKey;
     private bool _swallowLUp, _swallowRUp;
@@ -98,7 +105,7 @@ internal sealed class InputEngine : IDisposable
             _tracker.Reset();
         }
         _fieldVerified = true;
-        _autoSpace = false;
+        _autoSpace = _autoComma = false;
         _snap = null;
         Changed();
     }
@@ -143,7 +150,7 @@ internal sealed class InputEngine : IDisposable
         {
             foreach (var c in text) _tracker.Feed(c);
         }
-        _autoSpace = false;
+        _autoSpace = _autoComma = false;
         Changed();
     }
 
@@ -164,6 +171,12 @@ internal sealed class InputEngine : IDisposable
                                 && Hotkey.CurrentModifiers() == HotkeyModifiers.None;
             if (down && !_capsDown && !capsIsHotkey) _capsOn = !_capsOn;
             _capsDown = down;
+        }
+
+        if (vk == Win32.VK_TAB)
+        {
+            _tabDown = down;
+            if (!down) _tabAccept = null;
         }
 
         if (!down)
@@ -214,6 +227,20 @@ internal sealed class InputEngine : IDisposable
             }
             if (mods.HasFlag(HotkeyModifiers.Alt) || mods.HasFlag(HotkeyModifiers.Win)) TextInjector.Dummy();
             return true;
+        }
+
+        // Tab зажат после вставки: цифра 1–9 — заменить вставленное этим вариантом; автоповтор Tab — не вставлять дальше
+        if (_tabAccept is { } last && _tabDown)
+        {
+            if (vk == Win32.VK_TAB) return true;
+            int digit = vk is >= '1' and <= '9' ? vk - '1'
+                      : vk is > Win32.VK_NUMPAD0 and <= Win32.VK_NUMPAD9 ? vk - Win32.VK_NUMPAD0 - 1 : -1;
+            if (digit >= 0 && mods == HotkeyModifiers.None)
+            {
+                if (digit < last.Snap.Items.Count && digit != last.Index) ReplaceAccepted(last, digit);
+                return true;
+            }
+            if (!Hotkey.IsModifierKey(vk)) _tabAccept = null;
         }
 
         if (!opt.SuggestionsEnabled || _suppressed) return false;
@@ -298,7 +325,10 @@ internal sealed class InputEngine : IDisposable
             switch (vk)
             {
                 case Win32.VK_TAB:
+                    string word;
+                    lock (_sync) word = _tracker.GetContext().Word;
                     Accept(snap!, snap!.Selected);
+                    _tabAccept = new TabAccept(snap, snap.Selected, word);
                     return true;
                 case Win32.VK_DOWN or Win32.VK_UP when snap!.Items.Count > 1:
                     int n = snap.Items.Count;
@@ -330,7 +360,7 @@ internal sealed class InputEngine : IDisposable
                     _tracker.Backspace();
                     ForgetEdited();
                 }
-                _autoSpace = false;
+                _autoSpace = _autoComma = false;
                 Changed();
                 return false;
             case Win32.VK_LEFT or Win32.VK_RIGHT or Win32.VK_UP or Win32.VK_DOWN or Win32.VK_HOME or Win32.VK_END
@@ -346,14 +376,18 @@ internal sealed class InputEngine : IDisposable
         if (ch is null) return false;
         char c = ch.Value;
 
-        // «Слово_» + запятая → «Слово,» : убираем авто-пробел перед знаком препинания
-        if (_autoSpace && opt.SmartPunctuation && c is ',' or '.' or '!' or '?' or ':' or ';' or ')' && _tracker.LastCharIs(' '))
+        // «Слово_» + запятая → «Слово,» : убираем авто-пробел перед знаком препинания.
+        // «Здравствуйте,_» + «!» → «Здравствуйте!» : свою запятую тоже заменяем набранным знаком
+        bool dropSpace = _autoSpace && _tracker.LastCharIs(' ');
+        bool dropComma = _autoComma && c is ',' or '.' or '!' or '?' or ':' or ';';
+        if (dropComma || (dropSpace && opt.SmartPunctuation && c is ',' or '.' or '!' or '?' or ':' or ';' or ')'))
         {
-            _autoSpace = false;
-            TextInjector.Type(c.ToString(), 1, false);
+            int erase = (dropSpace ? 1 : 0) + (dropComma ? 1 : 0);
+            _autoSpace = _autoComma = false;
+            TextInjector.Type(c.ToString(), erase, false);
             lock (_sync)
             {
-                _tracker.Backspace();
+                for (int i = 0; i < erase; i++) _tracker.Backspace();
                 ForgetEdited();
                 Queue(_tracker.Feed(c));
             }
@@ -362,7 +396,7 @@ internal sealed class InputEngine : IDisposable
             return true;
         }
 
-        _autoSpace = false;
+        _autoSpace = _autoComma = false;
         lock (_sync) Queue(_tracker.Feed(c));
         FlushLearning(false);
         Changed();
@@ -407,6 +441,37 @@ internal sealed class InputEngine : IDisposable
         FlushLearning(false);
 
         _autoSpace = s.Insert.EndsWith(' ');
+        _autoComma = s.Insert.TrimEnd(' ').EndsWith(',');
+        _snap = null;
+        Changed();
+    }
+
+    /// <summary>
+    /// Tab+цифра: вместо только что вставленного варианта — вариант n. До вставки в поле было слово W;
+    /// вариант i стёр последние Backspaces(i) букв W и напечатал Insert(i). Стираем вставку (и при необходимости
+    /// ещё буквы W), возвращаем стёртые буквы, которые нужны варианту n, и печатаем его.
+    /// </summary>
+    private void ReplaceAccepted(TabAccept last, int n)
+    {
+        var s = last.Snap.Items[last.Index];
+        var t = last.Snap.Items[n];
+        var w = last.Word;
+        int bs = Math.Min(s.Backspaces, w.Length), bt = Math.Min(t.Backspaces, w.Length);
+        int erase = s.Insert.Length + Math.Max(0, bt - bs);
+        string text = (bs > bt ? w.Substring(w.Length - bs, bs - bt) : "") + t.Insert;
+        TextInjector.Type(text, erase, _opt.NewlineAsShiftEnter);
+
+        lock (_sync)
+        {
+            for (int i = 0; i < erase; i++) _tracker.Backspace();
+            ForgetEdited();
+            foreach (var c in text) Queue(_tracker.Feed(c));
+        }
+        FlushLearning(false);
+
+        _autoSpace = t.Insert.EndsWith(' ');
+        _autoComma = t.Insert.TrimEnd(' ').EndsWith(',');
+        _tabAccept = last with { Index = n };
         _snap = null;
         Changed();
     }
@@ -458,6 +523,21 @@ internal sealed class InputEngine : IDisposable
                     Post(_sink.OnRadialCancel);
                     return true;
             }
+        }
+        // Колесо над подсказкой листает варианты (страница под ней при этом не прокручивается).
+        // Дельты копятся до «щелчка» 120 — тачпад с мелкими шагами не пролистывает всё разом
+        if (msg == Win32.WM_MOUSEWHEEL && _snap is { } snap && snap.Version == Version && snap.Items.Count > 1 && PopupRect.Contains(pt.X, pt.Y))
+        {
+            _wheelAcc += (short)(mouseData >> 16);
+            int steps = _wheelAcc / 120;
+            _wheelAcc -= steps * 120;
+            int sel = Math.Clamp(snap.Selected - steps, 0, snap.Items.Count - 1);
+            if (sel != snap.Selected)
+            {
+                _snap = snap with { Selected = sel };
+                Post(() => _sink.OnSelectionChanged(sel));
+            }
+            return true;
         }
         if (msg == Win32.WM_LBUTTONUP && _swallowLUp) { _swallowLUp = false; return true; }
         if (msg == Win32.WM_RBUTTONUP && _swallowRUp) { _swallowRUp = false; return true; }
@@ -582,7 +662,8 @@ internal sealed class InputEngine : IDisposable
             hadSomething = _tracker.Tail.Length > 0;
             _tracker.Reset();
         }
-        _autoSpace = false;
+        _autoSpace = _autoComma = false;
+        _tabAccept = null;
         if (hadSomething || _snap is not null) Changed();
     }
 

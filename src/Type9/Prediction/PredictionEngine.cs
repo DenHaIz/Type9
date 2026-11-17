@@ -9,7 +9,8 @@ public sealed record PredictionOptions(
     bool AddSpace = true,
     bool NextWord = true,
     int NextWordMinCount = 2,
-    SuggestLanguage Language = SuggestLanguage.Russian);
+    SuggestLanguage Language = SuggestLanguage.Russian,
+    bool GreetingComma = true);
 
 /// <summary>
 /// Ранжирование вариантов. Оценка слова — смесь вероятностей:
@@ -174,7 +175,7 @@ public sealed class PredictionEngine
             .OrderByDescending(x => x.Score)
             .ThenBy(x => x.Key.Length)
             .Take(o.MaxResults)
-            .Select(x => MakeCompletion(ctx.Word, x.Form, space));
+            .Select(x => MakeCompletion(ctx.Word, x.Form, space, o.GreetingComma && Greeting.NeedsComma(x.Key, p1, p2) ? "," : ""));
     }
 
     private static IEnumerable<int> TopByUnigram(LanguageModel model, int from, int to, int prefixLen)
@@ -201,14 +202,15 @@ public sealed class PredictionEngine
         return days < 30 ? 1 + 0.5 * (1 - days / 30) : 1;
     }
 
-    internal static Suggestion MakeCompletion(string typed, string form, string space)
+    /// <param name="punct">Знак сразу после слова — запятая после приветствия («Здравствуйте,»).</param>
+    internal static Suggestion MakeCompletion(string typed, string form, string space, string punct = "")
     {
         var applied = CaseHelper.Apply(typed, form);
         if (applied.StartsWith(typed, StringComparison.Ordinal))
-            return new Suggestion(SuggestionKind.Completion, typed, applied[typed.Length..], applied[typed.Length..] + space, 0);
+            return new Suggestion(SuggestionKind.Completion, typed, applied[typed.Length..] + punct, applied[typed.Length..] + punct + space, 0);
         // Префикс отличается (например, «е»/«ё» или регистр) — заменяем слово целиком
         return new Suggestion(SuggestionKind.Completion, applied[..Math.Min(typed.Length, applied.Length)],
-            applied[Math.Min(typed.Length, applied.Length)..], applied + space, typed.Length);
+            applied[Math.Min(typed.Length, applied.Length)..] + punct, applied + punct + space, typed.Length);
     }
 
     // ------------------------------------------------------------------ следующее слово
@@ -269,6 +271,7 @@ public sealed class PredictionEngine
             .Select(kv =>
             {
                 var form = kv.Value.Form;
+                if (o.GreetingComma && Greeting.NeedsComma(kv.Key, p1, p2)) form += ",";
                 return new Suggestion(SuggestionKind.NextWord, "", form, lead + form + space, 0);
             });
     }
