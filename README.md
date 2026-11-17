@@ -12,7 +12,7 @@
 <img src="docs/screenshots/suggestions-dark.png" width="260" alt="Подсказки">
 </p>
 
-<p align="center"><b>Текущая версия: 0.3.1</b> · <a href="https://github.com/DenHaIz/Type9/releases/latest">Скачать Type9.exe</a></p>
+<p align="center"><b>Текущая версия: 0.3.2</b> · <a href="https://github.com/DenHaIz/Type9/releases/latest">Скачать Type9.exe</a></p>
 
 ## Возможности
 

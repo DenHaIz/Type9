@@ -22,12 +22,19 @@ public sealed class RadialView : Grid
 
     private sealed class Sector
     {
-        public required Canvas Host;
+        public required Canvas Host;     // фон сектора (под подсветкой)
+        public required Canvas Labels;   // подпись и номер (над подсветкой)
         public required SolidColorBrush Fill;
         public required SolidColorBrush LabelBrush;
         public required SolidColorBrush NumberBrush;
         public required ScaleTransform Scale;
     }
+
+    // Подсветка выбора — одна фигура на слой, которая «перетекает» к выбранному сектору поворотом.
+    // Анимируется только поворот и прозрачность: дёшево даже на встроенной графике, ровно на 60 Гц.
+    private Path _hl = new();
+    private RotateTransform _hlRotate = new();
+    private RadialGradientBrush _hlBrush = new();
 
     private readonly BitmapCache _discCache = new() { SnapsToDevicePixels = true };
     private Canvas _sectorLayer;
@@ -129,12 +136,44 @@ public sealed class RadialView : Grid
         _content.Children.Clear();
         _sectorLayer = NewLayer();
         _content.Children.Add(_sectorLayer);
+        int n = Populate(group);
+        UpdateCenter(group, page, pageCount, n);
+    }
 
+    /// <summary>Наполняет текущий слой: фоны секторов → подсветка → подписи.</summary>
+    private int Populate(PhraseGroup? group)
+    {
         var phrases = group?.Phrases.Take(PhraseGroup.MaxPhrases).ToList() ?? [];
         int n = phrases.Count;
         for (int i = 0; i < n; i++)
             _sectors.Add(CreateSector(phrases[i], i, n));
-        UpdateCenter(group, page, pageCount, n);
+        CreateHighlight(n);
+        foreach (var s in _sectors) _sectorLayer.Children.Add(s.Labels);
+        return n;
+    }
+
+    private void CreateHighlight(int n)
+    {
+        _hlRotate = new RotateTransform(0, C.X, C.Y);
+        _hlBrush = new RadialGradientBrush
+        {
+            MappingMode = BrushMappingMode.Absolute, Center = C, GradientOrigin = C, RadiusX = ROut, RadiusY = ROut,
+            GradientStops = { new GradientStop(default, RIn / ROut), new GradientStop(default, 1) },
+        };
+        ColorHighlight(Palette());
+        _hl = new Path
+        {
+            Data = RadialGeometry.Sector(C, RIn, ROut, 0, Math.Max(n, 1), Gap), Fill = _hlBrush,
+            RenderTransform = _hlRotate, Opacity = 0, IsHitTestVisible = false,
+        };
+        _sectorLayer.Children.Add(_hl);
+    }
+
+    /// <summary>Лёгкий перелив: у центра акцент чуть темнее, к краю — светлее.</summary>
+    private void ColorHighlight((Color sector, Color fg, Color muted, Color accent, Color onAccent) c)
+    {
+        _hlBrush.GradientStops[0].Color = ThemeManager.Mix(c.accent, Colors.Black, 0.12);
+        _hlBrush.GradientStops[1].Color = ThemeManager.Mix(c.accent, Colors.White, 0.12);
     }
 
     private void UpdateCenter(PhraseGroup? group, int page, int pageCount, int n)
@@ -170,6 +209,12 @@ public sealed class RadialView : Grid
             RenderTransformOrigin = new Point(0.5, 0.5),
             RenderTransform = scale,
         };
+        var labels = new Canvas
+        {
+            Width = ViewSize, Height = ViewSize, IsHitTestVisible = false,
+            RenderTransformOrigin = new Point(0.5, 0.5),
+            RenderTransform = scale,
+        };
 
         var path = new Path { Data = RadialGeometry.Sector(C, RIn, ROut, i, n, Gap), Fill = fill, StrokeThickness = 1 };
         path.SetResourceReference(Shape.StrokeProperty, "B.SectorLine");
@@ -191,7 +236,7 @@ public sealed class RadialView : Grid
         var lp = n == 1 ? new Point(C.X, C.Y - rLabel) : RadialGeometry.At(C, rLabel, mid);
         Canvas.SetLeft(label, lp.X - label.DesiredSize.Width / 2);
         Canvas.SetTop(label, lp.Y - label.DesiredSize.Height / 2);
-        host.Children.Add(label);
+        labels.Children.Add(label);
 
         var num = new TextBlock { Text = (i + 1).ToString(), Foreground = numberBrush, FontSize = 11.5 * (1 + (_textBoost - 1) / 2), FontWeight = FontWeights.SemiBold, IsHitTestVisible = false };
         num.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
@@ -200,10 +245,10 @@ public sealed class RadialView : Grid
         var np = RadialGeometry.At(C, ROut - 14, numAngle);
         Canvas.SetLeft(num, np.X - num.DesiredSize.Width / 2);
         Canvas.SetTop(num, np.Y - num.DesiredSize.Height / 2);
-        host.Children.Add(num);
+        labels.Children.Add(num);
 
         _sectorLayer.Children.Add(host);
-        return new Sector { Host = host, Fill = fill, LabelBrush = labelBrush, NumberBrush = numberBrush, Scale = scale };
+        return new Sector { Host = host, Labels = labels, Fill = fill, LabelBrush = labelBrush, NumberBrush = numberBrush, Scale = scale };
     }
 
     private (Color sector, Color fg, Color muted, Color accent, Color onAccent) Palette() => (
@@ -215,60 +260,90 @@ public sealed class RadialView : Grid
         if (index >= _sectors.Count) index = -1;
         if (index == _selected) return;
         var c = Palette();
+        int prev = _selected;
 
-        if (_selected >= 0) ApplyStyle(_sectors[_selected], false, c);
+        if (prev >= 0) SetLabel(_sectors[prev], false, c, animate ? LabelOut : null);
         _selected = index;
-        if (_selected >= 0)
+        if (index >= 0)
         {
-            ApplyStyle(_sectors[_selected], true, c);
-            var p = _group!.Phrases[_selected];
+            SetLabel(_sectors[index], true, c, animate ? Glide : null);
+            MoveHighlight(index, prev, animate);
+            var p = _group!.Phrases[index];
             _preview.Text = p.Text.Replace("\r", "").TrimEnd();
             _preview.SetResourceReference(TextBlock.ForegroundProperty, "B.Fg");
             _hubRing.SetResourceReference(Shape.StrokeProperty, "B.Accent");
         }
         else
         {
+            if (animate) _hl.Animate(OpacityProperty, 0, FadeOut, Motion.EaseOut);
+            else { _hl.BeginAnimation(OpacityProperty, null); _hl.Opacity = 0; }
             _preview.Text = Loc.T(_sectors.Count == 0 ? "R.Empty" : "R.Hover");
             _preview.SetResourceReference(TextBlock.ForegroundProperty, "B.FgMuted");
             _hubRing.SetResourceReference(Shape.StrokeProperty, "B.SectorLine");
         }
     }
 
-    private static readonly Duration SelectIn = TimeSpan.FromMilliseconds(70);
-    private static readonly Duration SelectOut = TimeSpan.FromMilliseconds(90);
+    private static readonly Duration Glide = TimeSpan.FromMilliseconds(140);
+    private static readonly Duration FadeIn = TimeSpan.FromMilliseconds(120);
+    private static readonly Duration FadeOut = TimeSpan.FromMilliseconds(160);
+    private static readonly Duration LabelOut = TimeSpan.FromMilliseconds(160);
 
     /// <summary>
-    /// Подсветка сектора. Выбор должен ощущаться мгновенным: цвет сразу прыгает на 75% пути к акценту
-    /// и за 4 кадра доходит до конца, подпись перекрашивается сразу. Сектор не сдвигается: при быстром
-    /// ведении мыши по кругу движение отставало бы от курсора. Recolor (смена темы) передаёт свою длительность.
+    /// Подсветка «перетекает» к новому сектору кратчайшим путём; анимация подхватывается с текущего угла,
+    /// поэтому при быстром ведении мыши по кругу она плавно догоняет курсор, а не прыгает.
+    /// Прыжок через центр (больше 100°) — без вращения: подсветка мягко проявляется на новом месте.
     /// </summary>
-    private static void ApplyStyle(Sector s, bool on, (Color sector, Color fg, Color muted, Color accent, Color onAccent) c, Duration? themeDuration = null)
+    private void MoveHighlight(int index, int prev, bool animate)
     {
-        if (themeDuration is { } td)
+        double target = RadialGeometry.SectorCenter(index, _sectors.Count);
+        double cur = _hlRotate.Angle;
+        double delta = ((target - cur) % 360 + 540) % 360 - 180;
+
+        if (!animate)
         {
-            s.Fill.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(on ? c.accent : c.sector, td));
-            s.LabelBrush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(on ? c.onAccent : c.fg, td));
-            s.NumberBrush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(on ? c.onAccent : c.muted, td));
+            _hlRotate.BeginAnimation(RotateTransform.AngleProperty, null);
+            _hlRotate.Angle = target;
+            _hl.BeginAnimation(OpacityProperty, null);
+            _hl.Opacity = 1;
             return;
         }
-
-        var from = s.Fill.Color;
-        var to = on ? c.accent : c.sector;
-        var jump = on ? ThemeManager.Mix(from, to, 0.75) : from;
-        s.Fill.BeginAnimation(SolidColorBrush.ColorProperty,
-            new ColorAnimation(jump, to, on ? SelectIn : SelectOut) { EasingFunction = Motion.EaseOut });
-
-        // Текст — без анимации: читается сразу
-        s.LabelBrush.BeginAnimation(SolidColorBrush.ColorProperty, null);
-        s.LabelBrush.Color = on ? c.onAccent : c.fg;
-        s.NumberBrush.BeginAnimation(SolidColorBrush.ColorProperty, null);
-        s.NumberBrush.Color = on ? c.onAccent : c.muted;
+        if (prev < 0 || Math.Abs(delta) > 100)
+        {
+            _hlRotate.BeginAnimation(RotateTransform.AngleProperty, null);
+            _hlRotate.Angle = target;
+            _hl.Animate(OpacityProperty, 1, FadeIn, Motion.EaseOut, prev < 0 ? Math.Min(_hl.Opacity, 0.2) : 0.35);
+            return;
+        }
+        _hlRotate.Animate(RotateTransform.AngleProperty, cur + delta, Glide, Motion.EaseOut);
+        _hl.Animate(OpacityProperty, 1, FadeIn, Motion.EaseOut);
     }
+
+    /// <summary>Цвет подписи переливается одновременно с движением подсветки.</summary>
+    private static void SetLabel(Sector s, bool on, (Color sector, Color fg, Color muted, Color accent, Color onAccent) c, Duration? d)
+    {
+        var label = on ? c.onAccent : c.fg;
+        var num = on ? c.onAccent : c.muted;
+        if (d is { } dur)
+        {
+            s.LabelBrush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(label, dur) { EasingFunction = Motion.EaseOut });
+            s.NumberBrush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(num, dur) { EasingFunction = Motion.EaseOut });
+            return;
+        }
+        s.LabelBrush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+        s.LabelBrush.Color = label;
+        s.NumberBrush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+        s.NumberBrush.Color = num;
+    }
+
     private void Recolor()
     {
         var c = Palette();
+        ColorHighlight(c);
         for (int i = 0; i < _sectors.Count; i++)
-            ApplyStyle(_sectors[i], i == _selected, c, Motion.Slow);
+        {
+            _sectors[i].Fill.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(c.sector, Motion.Slow));
+            SetLabel(_sectors[i], i == _selected, c, Motion.Slow);
+        }
     }
 
     /// <summary>Появление: диск «раскрывается», сектора разлетаются веером.</summary>
@@ -286,6 +361,7 @@ public sealed class RadialView : Grid
             var s = _sectors[i];
             var delay = TimeSpan.FromMilliseconds(12 * i);
             s.Host.BeginAnimation(OpacityProperty, Motion.To(1, Motion.Normal, Motion.EaseOut, 0, delay));
+            s.Labels.BeginAnimation(OpacityProperty, Motion.To(1, Motion.Normal, Motion.EaseOut, 0, delay));
             s.Scale.BeginAnimation(ScaleTransform.ScaleXProperty, Motion.To(1, Motion.Normal, Motion.Spring, 0.9, delay));
             s.Scale.BeginAnimation(ScaleTransform.ScaleYProperty, Motion.To(1, Motion.Normal, Motion.Spring, 0.9, delay));
         }
@@ -313,9 +389,8 @@ public sealed class RadialView : Grid
         _sectorLayer = NewLayer();
         _content.Children.Add(_sectorLayer);
 
-        var phrases = group?.Phrases.Take(PhraseGroup.MaxPhrases).ToList() ?? [];
-        for (int i = 0; i < phrases.Count; i++) _sectors.Add(CreateSector(phrases[i], i, phrases.Count));
-        UpdateCenter(group, page, pageCount, phrases.Count);
+        int count = Populate(group);
+        UpdateCenter(group, page, pageCount, count);
         Anim.Pulse(_title);
 
         var dur = new Duration(TimeSpan.FromMilliseconds(260));

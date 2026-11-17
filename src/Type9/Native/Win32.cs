@@ -187,6 +187,37 @@ internal static class Win32
     public static extern bool GetCursorPos(out POINT lpPoint);
 
     [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(POINT pt);
+
+    public const uint GA_ROOT = 2;
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetWindowDpiAwarenessContext(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr dpiContext);
+
+    [DllImport("user32.dll")]
+    public static extern bool LogicalToPhysicalPointForPerMonitorDPI(IntPtr hwnd, ref POINT lpPoint);
+
+    /// <summary>
+    /// Точка в клиентских координатах чужого окна → физические пиксели экрана. Окна без поддержки DPI
+    /// (или с «системным» DPI) живут в виртуальных координатах: переводим в их контексте и масштабируем.
+    /// </summary>
+    public static POINT ClientToPhysical(IntPtr hwnd, POINT pt)
+    {
+        var ctx = GetWindowDpiAwarenessContext(hwnd);
+        var old = ctx != IntPtr.Zero ? SetThreadDpiAwarenessContext(ctx) : IntPtr.Zero;
+        try { ClientToScreen(hwnd, ref pt); }
+        finally { if (old != IntPtr.Zero) SetThreadDpiAwarenessContext(old); }
+        LogicalToPhysicalPointForPerMonitorDPI(hwnd, ref pt);
+        return pt;
+    }
+
+    [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]

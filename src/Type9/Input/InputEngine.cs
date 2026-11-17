@@ -77,6 +77,9 @@ internal sealed class InputEngine : IDisposable
     private int _hotkeyKey;
     private bool _swallowLUp, _swallowRUp;
 
+    /// <summary>Клик левой/правой кнопкой (вызывается в потоке хуков — только быстрые действия).</summary>
+    public Action<Win32.POINT>? Clicked { get; set; }
+
     public InputEngine(Dispatcher ui, IInputSink sink, EngineOptions options)
     {
         _ui = ui;
@@ -545,6 +548,7 @@ internal sealed class InputEngine : IDisposable
         if (msg is Win32.WM_LBUTTONDOWN or Win32.WM_RBUTTONDOWN or Win32.WM_MBUTTONDOWN or Win32.WM_XBUTTONDOWN)
         {
             if (PopupRect.Contains(pt.X, pt.Y)) return false; // клик по самой подсказке
+            if (msg is Win32.WM_LBUTTONDOWN or Win32.WM_RBUTTONDOWN) Clicked?.Invoke(pt); // каретка, скорее всего, теперь здесь
             ResetTracking();
         }
         return false;

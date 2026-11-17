@@ -42,6 +42,7 @@ internal sealed class AppController : IInputSink, IDisposable
         Prediction.Abbreviations = phrases.Abbreviations;
         _caret = new CaretLocator(ui);
         Engine = new InputEngine(ui, this, EngineOptions.From(settings));
+        Engine.Clicked = _caret.NoteClick;
 
         _dictSaveTimer = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background, (_, _) => SaveDictionary(false), ui);
         _settingsSaveTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(400), DispatcherPriority.Background, (_, _) =>

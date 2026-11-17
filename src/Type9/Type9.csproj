@@ -11,7 +11,7 @@
     <AssemblyName>Type9</AssemblyName>
     <RootNamespace>Type9</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.3.1</Version>
+    <Version>0.3.2</Version>
     <Product>Type9</Product>
     <Description>Автодополнение и круговое меню фраз для Windows</Description>
     <SatelliteResourceLanguages>en;ru</SatelliteResourceLanguages>
