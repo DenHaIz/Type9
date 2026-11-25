@@ -59,13 +59,13 @@ internal sealed class AppController : IInputSink, IDisposable
         _settingsSaveTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(400), DispatcherPriority.Background, (_, _) =>
         {
             _settingsSaveTimer!.Stop();
-            Storage.Save(Paths.Settings, Settings, JsonCtx.Default.AppSettings);
+            Storage.SaveInBackground(Paths.Settings, Settings, JsonCtx.Default.AppSettings);
         }, ui);
         _settingsSaveTimer.Stop();
         _phrasesSaveTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(600), DispatcherPriority.Background, (_, _) =>
         {
             _phrasesSaveTimer!.Stop();
-            Storage.Save(Paths.Phrases, Phrases, JsonCtx.Default.PhraseBook);
+            Storage.SaveInBackground(Paths.Phrases, Phrases, JsonCtx.Default.PhraseBook);
         }, ui);
         _phrasesSaveTimer.Stop();
 
@@ -108,6 +108,7 @@ internal sealed class AppController : IInputSink, IDisposable
                 if (early.WordCount > 0) user!.Merge(early.Serialize());
                 Prediction.User = user!;
                 _dictLoaded = true;
+                FixUserForms();
                 DictionaryChanged?.Invoke();
                 Log.Info($"Личный словарь: {user!.WordCount} слов, дополнительный: {extras.Count}");
             });
@@ -146,6 +147,7 @@ internal sealed class AppController : IInputSink, IDisposable
                     _ui.BeginInvoke(() =>
                     {
                         assign(m);
+                        FixUserForms();
                         DictionaryChanged?.Invoke();
                         Log.Info($"Модель «{lang}» загружена за {sw.ElapsedMilliseconds} мс: {m.Count} слов");
                         _ui.BeginInvoke(() => { TrimMemory(); WarmUp(); }, DispatcherPriority.ApplicationIdle);
@@ -168,6 +170,14 @@ internal sealed class AppController : IInputSink, IDisposable
     }
 
     private bool _loadingRu, _loadingEn;
+
+    /// <summary>Слова, сохранённые прежними версиями капсом, приводим к обычному виду (когда известен словарь).</summary>
+    private void FixUserForms()
+    {
+        if (!_dictLoaded || Prediction.Russian is null && Prediction.English is null) return;
+        int n = Prediction.User.FixForms();
+        if (n > 0) Log.Info($"Личный словарь: исправлен регистр у {n} слов");
+    }
 
     // ------------------------------------------------------------------ обновления
 
@@ -276,7 +286,8 @@ internal sealed class AppController : IInputSink, IDisposable
             return;
         }
 
-        _popup.SetItems(items, selected);
+        // Новые варианты показываем вместе с новой позицией: иначе плашка успевала вырасти на старом месте
+        // (над кареткой — вниз, на набираемую строку), пока определялась каретка
         _caret.Request(version, (v, info) =>
         {
             if (info.IsPassword)
@@ -287,6 +298,7 @@ internal sealed class AppController : IInputSink, IDisposable
             }
             Engine.MarkFieldVerified();
             if (v != Engine.Version) return;
+            _popup.SetItems(items, Engine.SelectedIndex(v) ?? selected);
             _popup.ShowAt(info, Settings.Placement == PopupPlacement.Fixed);
             Engine.PopupRect = _popup.ScreenRect;
         });
@@ -495,11 +507,16 @@ internal sealed class AppController : IInputSink, IDisposable
 
     private void WatchPhrases()
     {
+        // Одно редактирование меняет несколько свойств (текст → подпись), «Сбросить» — десятки: превью колеса
+        // перестраиваем один раз, когда изменения закончились
+        bool notifyQueued = false;
         void OnAnyChange()
         {
             _phrasesSaveTimer.Stop();
             _phrasesSaveTimer.Start();
-            PhrasesChanged?.Invoke();
+            if (notifyQueued) return;
+            notifyQueued = true;
+            _ui.BeginInvoke(() => { notifyQueued = false; PhrasesChanged?.Invoke(); }, DispatcherPriority.Background);
         }
 
         void HookPhrase(Phrase p) => p.PropertyChanged += (_, _) => OnAnyChange();
@@ -594,6 +611,7 @@ internal sealed class AppController : IInputSink, IDisposable
         SaveDictionary(true);
         if (_settingsSaveTimer.IsEnabled) SaveSettingsNow();
         if (_phrasesSaveTimer.IsEnabled) Storage.Save(Paths.Phrases, Phrases, JsonCtx.Default.PhraseBook);
+        Storage.Flush();
         _tray?.Dispose();
     }
 }

@@ -61,7 +61,7 @@ public class TypoCorrectionTests
     [Fact]
     public void NeverSuggestsObscenities()
     {
-        Assert.Empty(Predict("выеда"));
+        Assert.DoesNotContain(Predict("выеда"), s => Profanity.IsObscene(CaseHelper.Normalize(s.Display)));
         Assert.True(Profanity.IsObscene("выебать"));
         Assert.False(Profanity.IsObscene("мандарин"));
         Assert.False(Profanity.IsObscene("небо"));

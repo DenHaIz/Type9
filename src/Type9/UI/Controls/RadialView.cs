@@ -28,6 +28,7 @@ public sealed class RadialView : Grid
         public required SolidColorBrush LabelBrush;
         public required SolidColorBrush NumberBrush;
         public required ScaleTransform Scale;
+        public double Level, Target;     // 0 — обычная подпись, 1 — подпись на подсветке
     }
 
     // Подсветка выбора — одна фигура на слой, которая «перетекает» к выбранному сектору поворотом.
@@ -35,6 +36,13 @@ public sealed class RadialView : Grid
     private Path _hl = new();
     private RotateTransform _hlRotate = new();
     private RadialGradientBrush _hlBrush = new();
+
+    // Выбор анимируется покадрово (а не раскадровками): угол и прозрачность подсветки, цвет подписей плавно
+    // догоняют цель. При быстром ведении мыши ничего не перезапускается и не «дёргается».
+    private double _hlAngle, _hlAngleTarget, _hlOpacity, _hlOpacityTarget;
+    private bool _ticking;
+    private TimeSpan _lastTick;
+    private (Color sector, Color fg, Color muted, Color accent, Color onAccent) _pal;
 
     private readonly BitmapCache _discCache = new() { SnapsToDevicePixels = true };
     private readonly Ellipse _disc;
@@ -170,6 +178,7 @@ public sealed class RadialView : Grid
     private void CreateHighlight(int n)
     {
         _hlRotate = new RotateTransform(0, C.X, C.Y);
+        _hlAngle = _hlAngleTarget = _hlOpacity = _hlOpacityTarget = 0;
         _hlBrush = new RadialGradientBrush
         {
             MappingMode = BrushMappingMode.Absolute, Center = C, GradientOrigin = C, RadiusX = ROut, RadiusY = ROut,
@@ -274,15 +283,23 @@ public sealed class RadialView : Grid
     {
         if (index >= _sectors.Count) index = -1;
         if (index == _selected) return;
-        var c = Palette();
         int prev = _selected;
-
-        if (prev >= 0) SetLabel(_sectors[prev], false, c, animate ? LabelOut : null);
         _selected = index;
+        _pal = Palette();
+
+        for (int i = 0; i < _sectors.Count; i++) _sectors[i].Target = i == index ? 1 : 0;
         if (index >= 0)
         {
-            SetLabel(_sectors[index], true, c, animate ? Glide : null);
-            MoveHighlight(index, prev, animate);
+            double target = RadialGeometry.SectorCenter(index, _sectors.Count);
+            double delta = ((target - _hlAngle) % 360 + 540) % 360 - 180;
+            _hlAngleTarget = _hlAngle + delta;
+            // Появление или прыжок через центр — без вращения: подсветка мягко проявляется на новом месте
+            if (prev < 0 || Math.Abs(delta) > 100)
+            {
+                _hlAngle = _hlAngleTarget;
+                _hlOpacity = Math.Min(_hlOpacity, prev < 0 ? 0.2 : 0.35);
+            }
+            _hlOpacityTarget = 1;
             var p = _group!.Phrases[index];
             _preview.Text = p.Text.Replace("\r", "").TrimEnd();
             _preview.SetResourceReference(TextBlock.ForegroundProperty, "B.Fg");
@@ -290,75 +307,83 @@ public sealed class RadialView : Grid
         }
         else
         {
-            if (animate) _hl.Animate(OpacityProperty, 0, FadeOut, Motion.EaseOut);
-            else { _hl.BeginAnimation(OpacityProperty, null); _hl.Opacity = 0; }
+            _hlOpacityTarget = 0;
             _preview.Text = Loc.T(_sectors.Count == 0 ? "R.Empty" : "R.Hover");
             _preview.SetResourceReference(TextBlock.ForegroundProperty, "B.FgMuted");
             _hubRing.SetResourceReference(Shape.StrokeProperty, "B.SectorLine");
         }
-    }
-
-    private static readonly Duration Glide = TimeSpan.FromMilliseconds(140);
-    private static readonly Duration FadeIn = TimeSpan.FromMilliseconds(120);
-    private static readonly Duration FadeOut = TimeSpan.FromMilliseconds(160);
-    private static readonly Duration LabelOut = TimeSpan.FromMilliseconds(160);
-
-    /// <summary>
-    /// Подсветка «перетекает» к новому сектору кратчайшим путём; анимация подхватывается с текущего угла,
-    /// поэтому при быстром ведении мыши по кругу она плавно догоняет курсор, а не прыгает.
-    /// Прыжок через центр (больше 100°) — без вращения: подсветка мягко проявляется на новом месте.
-    /// </summary>
-    private void MoveHighlight(int index, int prev, bool animate)
-    {
-        double target = RadialGeometry.SectorCenter(index, _sectors.Count);
-        double cur = _hlRotate.Angle;
-        double delta = ((target - cur) % 360 + 540) % 360 - 180;
 
         if (!animate)
         {
-            _hlRotate.BeginAnimation(RotateTransform.AngleProperty, null);
-            _hlRotate.Angle = target;
-            _hl.BeginAnimation(OpacityProperty, null);
-            _hl.Opacity = 1;
+            _hlAngle = _hlAngleTarget;
+            _hlOpacity = _hlOpacityTarget;
+            foreach (var s in _sectors) s.Level = s.Target;
+            ApplySelection(force: true);
             return;
         }
-        if (prev < 0 || Math.Abs(delta) > 100)
-        {
-            _hlRotate.BeginAnimation(RotateTransform.AngleProperty, null);
-            _hlRotate.Angle = target;
-            _hl.Animate(OpacityProperty, 1, FadeIn, Motion.EaseOut, prev < 0 ? Math.Min(_hl.Opacity, 0.2) : 0.35);
-            return;
-        }
-        _hlRotate.Animate(RotateTransform.AngleProperty, cur + delta, Glide, Motion.EaseOut);
-        _hl.Animate(OpacityProperty, 1, FadeIn, Motion.EaseOut);
+        StartTicking();
     }
 
-    /// <summary>Цвет подписи переливается одновременно с движением подсветки.</summary>
-    private static void SetLabel(Sector s, bool on, (Color sector, Color fg, Color muted, Color accent, Color onAccent) c, Duration? d)
+    private void StartTicking()
     {
-        var label = on ? c.onAccent : c.fg;
-        var num = on ? c.onAccent : c.muted;
-        if (d is { } dur)
-        {
-            s.LabelBrush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(label, dur) { EasingFunction = Motion.EaseOut });
-            s.NumberBrush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(num, dur) { EasingFunction = Motion.EaseOut });
-            return;
-        }
-        s.LabelBrush.BeginAnimation(SolidColorBrush.ColorProperty, null);
-        s.LabelBrush.Color = label;
-        s.NumberBrush.BeginAnimation(SolidColorBrush.ColorProperty, null);
-        s.NumberBrush.Color = num;
+        if (_ticking) return;
+        _ticking = true;
+        _lastTick = TimeSpan.Zero;
+        CompositionTarget.Rendering += Tick;
     }
+
+    private void StopTicking()
+    {
+        if (!_ticking) return;
+        _ticking = false;
+        CompositionTarget.Rendering -= Tick;
+    }
+
+    /// <summary>Один кадр: всё экспоненциально приближается к цели (постоянная времени ~40–60 мс).</summary>
+    private void Tick(object? sender, EventArgs e)
+    {
+        var now = e is RenderingEventArgs r ? r.RenderingTime : TimeSpan.Zero;
+        if (now == _lastTick && now != TimeSpan.Zero) return; // событие бывает дважды за кадр
+        double dt = _lastTick == TimeSpan.Zero ? 1 / 60.0 : Math.Clamp((now - _lastTick).TotalSeconds, 0, 0.05);
+        _lastTick = now;
+
+        bool busy = false;
+        busy |= Approach(ref _hlAngle, _hlAngleTarget, dt, 0.042, 0.05);
+        busy |= Approach(ref _hlOpacity, _hlOpacityTarget, dt, _hlOpacityTarget > _hlOpacity ? 0.04 : 0.06, 0.004);
+        foreach (var s in _sectors) busy |= Approach(ref s.Level, s.Target, dt, 0.05, 0.004);
+        ApplySelection(force: false);
+        if (!busy) StopTicking();
+    }
+
+    private static bool Approach(ref double cur, double target, double dt, double tau, double eps)
+    {
+        if (cur == target) return false;
+        cur += (target - cur) * (1 - Math.Exp(-dt / tau));
+        if (Math.Abs(target - cur) < eps) cur = target;
+        return cur != target;
+    }
+
+    private void ApplySelection(bool force)
+    {
+        if (force || _hlRotate.Angle != _hlAngle) _hlRotate.Angle = _hlAngle;
+        if (force || _hl.Opacity != _hlOpacity) _hl.Opacity = _hlOpacity;
+        foreach (var s in _sectors)
+        {
+            var label = Mix(_pal.fg, _pal.onAccent, s.Level);
+            if (force || s.LabelBrush.Color != label) s.LabelBrush.Color = label;
+            var num = Mix(_pal.muted, _pal.onAccent, s.Level);
+            if (force || s.NumberBrush.Color != num) s.NumberBrush.Color = num;
+        }
+    }
+
+    private static Color Mix(Color a, Color b, double t) => t <= 0 ? a : t >= 1 ? b : ThemeManager.Mix(a, b, t);
 
     private void Recolor()
     {
-        var c = Palette();
+        var c = _pal = Palette();
         ColorHighlight(c);
-        for (int i = 0; i < _sectors.Count; i++)
-        {
-            _sectors[i].Fill.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(c.sector, Motion.Slow));
-            SetLabel(_sectors[i], i == _selected, c, Motion.Slow);
-        }
+        foreach (var s in _sectors) s.Fill.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(c.sector, Motion.Slow));
+        ApplySelection(force: true);
     }
 
     /// <summary>Появление: диск «раскрывается», сектора разлетаются веером.</summary>
@@ -449,9 +474,22 @@ public sealed class RadialView : Grid
         s.Animate(ScaleTransform.ScaleYProperty, 1, Motion.Slow, Motion.EaseOutStrong, 0.94);
     }
 
-    /// <summary>Индекс сектора по смещению от центра в DIP.</summary>
-    public int HitIndex(double dx, double dy, double deadZone = 34) =>
-        RadialGeometry.IndexFromVector(dx, dy, _sectors.Count, deadZone);
+    /// <summary>
+    /// Индекс сектора по смещению от центра в DIP. Выбранный сектор держится, пока курсор не ушёл за его край
+    /// на несколько градусов (или заметно вглубь центра) — на границе выбор не мигает.
+    /// </summary>
+    public int HitIndex(double dx, double dy, double deadZone = 34)
+    {
+        int n = _sectors.Count;
+        if (_selected >= 0 && _selected < n && dx * dx + dy * dy >= (deadZone - 6) * (deadZone - 6))
+        {
+            if (n == 1) return _selected;
+            double deg = Math.Atan2(dx, -dy) * 180 / Math.PI;
+            double off = Math.Abs(((deg - RadialGeometry.SectorCenter(_selected, n)) % 360 + 540) % 360 - 180);
+            if (off <= 180.0 / n + 4) return _selected;
+        }
+        return RadialGeometry.IndexFromVector(dx, dy, n, deadZone);
+    }
 
     private void OnMouseMove(object sender, MouseEventArgs e)
     {

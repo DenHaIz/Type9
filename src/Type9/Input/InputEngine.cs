@@ -121,7 +121,7 @@ internal sealed class InputEngine : IDisposable
 
     // Пока текущее поле не проверено на «пароль» через UI Automation, набранное не попадает в словарь
     private volatile bool _fieldVerified;
-    private bool _capsDown, _capsCycling, _pauseHeld;
+    private bool _capsDown, _capsArmed, _capsCycling, _pauseHeld;
 
     public Win32.RECT PopupRect
     {
@@ -151,10 +151,16 @@ internal sealed class InputEngine : IDisposable
     /// </summary>
     public void SyncCapsLock(bool on)
     {
-        if (!_capsDown) _capsOn = on;
+        if (!_capsDown && !_capsArmed) _capsOn = on;
     }
 
+    /// <summary>Как сейчас считает регистр отслеживание по нажатиям (для сверки с системой).</summary>
+    public bool CapsOn => _capsOn;
+
     public void ClearSuggestions() => _snap = null;
+
+    /// <summary>Выбранный сейчас вариант для подсказок этой версии (могли сменить ↑/↓/CapsLock до показа).</summary>
+    public int? SelectedIndex(int version) => _snap is { } s && s.Version == version ? s.Selected : null;
 
     /// <summary>Принять подсказку кликом мыши (UI-поток).</summary>
     public void AcceptFromUi(int index)
@@ -210,7 +216,14 @@ internal sealed class InputEngine : IDisposable
                 else Interlocked.Increment(ref _capsPendingSteps);
                 return true;
             }
-            if (down && !_capsDown && !capsIsHotkey) _capsOn = !_capsOn;
+            // Регистр меняем по отпусканию и только если нажатие дошло до системы: переключатели раскладки
+            // «по CapsLock» и переназначения клавиш «съедают» его уже после нашего хука — тогда капс не включился
+            if (down && !_capsDown && !capsIsHotkey) _capsArmed = true;
+            if (!down && _capsArmed)
+            {
+                _capsArmed = false;
+                if (Win32.IsKeyDown(Win32.VK_CAPITAL)) _capsOn = !_capsOn;
+            }
             _capsDown = down;
         }
 
@@ -707,6 +720,11 @@ internal sealed class InputEngine : IDisposable
     /// <param name="commit">true — набранное окончательно (ушли из поля/строки); false — правка, отложенное выбрасываем.</param>
     private void ResetTracking(bool commit = true)
     {
+        // Последнее слово перед кликом по «Отправить» / сменой поля разделителем не завершено — завершаем сами
+        if (commit && _opt.LearnEnabled)
+            lock (_sync)
+                if (_tracker.GetContext().Word.Length > 0 && _tracker.Feed('\n') is { } last)
+                    Queue(last with { Tentative = true });
         if (commit && _fieldVerified) FlushLearning(all: true);
         else lock (_sync) _pending.Clear();
         bool hadSomething;

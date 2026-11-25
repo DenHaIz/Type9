@@ -23,8 +23,12 @@ internal static class Updater
 
     /// <summary>Обновлять файл можно только у собранного single-file exe (не при запуске из IDE).</summary>
 #pragma warning disable IL3000 // пустой Location — как раз признак single-file
-    public static bool CanSelfUpdate => string.IsNullOrEmpty(typeof(Updater).Assembly.Location) && Environment.ProcessPath is not null
-                                        && FolderWritable(Path.GetDirectoryName(Environment.ProcessPath)!);
+    // Проверка записью пробного файла — один раз за запуск (её читает и обновление статуса во время загрузки)
+    private static readonly Lazy<bool> CanSelfUpdateLazy = new(() =>
+        string.IsNullOrEmpty(typeof(Updater).Assembly.Location) && Environment.ProcessPath is not null
+        && FolderWritable(Path.GetDirectoryName(Environment.ProcessPath)!));
+
+    public static bool CanSelfUpdate => CanSelfUpdateLazy.Value;
 
     private static bool FolderWritable(string dir)
     {
@@ -57,7 +61,10 @@ internal static class Updater
     /// <summary>Последний релиз, если он новее текущей версии; иначе null.</summary>
     public static async Task<ReleaseInfo?> CheckAsync(CancellationToken ct = default)
     {
-        using var resp = await Http.GetAsync($"https://api.github.com/repos/{Repo}/releases/latest", ct);
+        // Проверка — короткий запрос: при «чёрной дыре» прокси кнопка не должна ждать таймаута загрузки (5 мин)
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(20));
+        using var resp = await Http.GetAsync($"https://api.github.com/repos/{Repo}/releases/latest", cts.Token);
         resp.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
         var root = doc.RootElement;
@@ -110,12 +117,14 @@ internal static class Updater
             await using var dst = File.Create(tmp);
             var buffer = new byte[1 << 16];
             long done = 0;
-            int n;
+            int n, lastPercent = -1;
             while ((n = await src.ReadAsync(buffer, ct)) > 0)
             {
                 await dst.WriteAsync(buffer.AsMemory(0, n), ct);
                 done += n;
-                if (total > 0) progress?.Report((double)done / total);
+                // Прогресс — только при смене целого процента, а не на каждый блок 64 КБ
+                int percent = total > 0 ? (int)(done * 100 / total) : -1;
+                if (percent != lastPercent) { lastPercent = percent; progress?.Report((double)done / total); }
             }
         }
 

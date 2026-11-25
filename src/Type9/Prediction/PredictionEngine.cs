@@ -28,13 +28,35 @@ public sealed class PredictionEngine
     public const double SupplementFreq = 2e-5;
     private const int UnigramShortlist = 400;
 
+    // Согласование окончаний (подобрано по отложенным предложениям корпусов, см. HANDOFF): степень поправки
+    // для частоты слова, доля для контекстной части, вес таблицы «окончание через слово»
+    private const double LiftPowRu = 0.6, LiftPowEn = 0.4, CtxLiftShare = 0.4, SkipLiftPow = 0.5;
+
     public LanguageModel? Russian { get; set; }
     public LanguageModel? English { get; set; }
     public BaseDictionary Extra { get; set; } = BaseDictionary.Empty;
 
     /// <summary>Встроенный деловой словарь (русский): слова, которых нет в модели по субтитрам.</summary>
     public BaseDictionary Supplement { get; set; } = BaseDictionary.Empty;
-    public UserModel User { get; set; } = new();
+    private UserModel _user = new();
+
+    /// <summary>Личный словарь. Ему передаётся словарная форма слов — чтобы случайный капс не запоминался.</summary>
+    public UserModel User
+    {
+        get => _user;
+        set { _user = value; _user.KnownForm = KnownForm; }
+    }
+
+    public PredictionEngine() => _user.KnownForm = KnownForm;
+
+    /// <summary>Словарная форма по нормализованному ключу: деловой словарь («ИНН»), затем языковая модель; null — неизвестно.</summary>
+    public string? KnownForm(string key)
+    {
+        if (Supplement.FormOf(key) is { } f) return f;
+        var model = ModelFor(ScriptOf(key));
+        int id = model?.Find(key) ?? -1;
+        return id >= 0 ? model!.Form(id) : null;
+    }
     public IReadOnlyList<Abbreviation> Abbreviations { get; set; } = [];
 
     private enum Script { Other, Cyrillic, Latin }
@@ -81,22 +103,28 @@ public sealed class PredictionEngine
             if (ctx.Word.Length >= Math.Max(1, o.MinPrefix) && Allowed(script, o.Language))
             {
                 var model = ModelFor(script);
-                var comps = Completions(ctx, model, o, space).ToList();
-                var fixes = new List<Suggestion>();
+                var fixes = new List<(Suggestion S, double Score)>();
+                double fixScore = 0;
                 if (o.Corrections)
                 {
                     string? p1 = ctx.Prev1 is null ? null : CaseHelper.Normalize(ctx.Prev1);
                     string? p2 = ctx.Prev2 is null ? null : CaseHelper.Normalize(ctx.Prev2);
-                    foreach (var (key, form) in Corrections(ctx.Word, model, prefixMode: true))
+                    foreach (var (key, form, score) in Corrections(ctx.Word, model, prefixMode: true))
                     {
                         var punct = o.GreetingComma && Greeting.NeedsComma(key, p1, p2) ? "," : "";
                         var text = CaseHelper.Apply(ctx.Word, form, o.AutoCapitalize && ctx.SentenceStart) + punct;
-                        comps.RemoveAll(c => string.Equals(c.Display.TrimEnd(','), text.TrimEnd(','), StringComparison.OrdinalIgnoreCase));
-                        fixes.Add(new Suggestion(SuggestionKind.Correction, "", text, text + space, ctx.Word.Length));
+                        fixes.Add((new Suggestion(SuggestionKind.Correction, "", text, text + space, ctx.Word.Length), score));
+                        fixScore = Math.Max(fixScore, score);
                     }
                 }
-                // Исправление в разы частотнее всего, что начинается с набранного: такие дополнения — мусор корпуса
-                result.AddRange(fixes.Count > 0 ? fixes : comps);
+                // Исправление — первым; остальные места — дополнения набранного. Если исправление намного частотнее
+                // всего, что начинается с набранного, слабые дополнения (мусор корпуса: «приетто») не показываем
+                var comps = Completions(ctx, model, o, space, fixScore / 300).ToList();
+                comps.RemoveAll(c => fixes.Any(f => string.Equals(c.Display.TrimEnd(','), f.S.Display.TrimEnd(','), StringComparison.OrdinalIgnoreCase)));
+                if (fixes.Count > 0) result.Add(fixes[0].S);
+                result.AddRange(comps);
+                // Запасное исправление — только если оно почти так же вероятно, как первое
+                result.AddRange(fixes.Skip(1).Where(f => f.Score >= fixScore * 0.3).Select(f => f.S));
             }
         }
         else if (ctx.Prev1 is not null)
@@ -107,7 +135,7 @@ public sealed class PredictionEngine
                 // Слово только что закончено пробелом — если в нём опечатка, первым вариантом предлагаем исправить его
                 if (o.Corrections && ctx.Gap.Length is >= 1 and <= 3 && ctx.Gap[^1] == ' '
                     && ctx.Gap.All(c => c is ' ' or ',' or '!' or '?' or ':' or ';')
-                    && Corrections(ctx.Prev1, ModelFor(script), prefixMode: false) is [var (key, form), ..])
+                    && Corrections(ctx.Prev1, ModelFor(script), prefixMode: false) is [var (key, form, _), ..])
                 {
                     var p2 = ctx.Prev2 is null ? null : CaseHelper.Normalize(ctx.Prev2);
                     var gap = ctx.Gap == " " && o.GreetingComma && Greeting.NeedsComma(key, p2, null) ? ", " : ctx.Gap;
@@ -130,7 +158,8 @@ public sealed class PredictionEngine
         public double BaseUni, UserUni, BaseCtx, UserCtx;
     }
 
-    private IEnumerable<Suggestion> Completions(TypingContext ctx, LanguageModel? model, PredictionOptions o, string space)
+    /// <param name="minWeak">Порог для дополнений без поддержки контекста и личного словаря (когда есть исправление опечатки).</param>
+    private IEnumerable<Suggestion> Completions(TypingContext ctx, LanguageModel? model, PredictionOptions o, string space, double minWeak = 0)
     {
         var prefix = CaseHelper.Normalize(ctx.Word);
         var p1 = ctx.Prev1 is null ? null : CaseHelper.Normalize(ctx.Prev1);
@@ -179,7 +208,11 @@ public sealed class PredictionEngine
         if (script == Script.Cyrillic)
             foreach (var (key, form, weight) in Supplement.ByPrefix(prefix))
                 if (key.Length > prefix.Length)
-                    Get(key, form).BaseUni += SupplementFreq * weight;
+                {
+                    var c = Get(key, form);
+                    c.BaseUni += SupplementFreq * weight;
+                    if (form.Skip(1).Any(char.IsUpper)) c.Form = form; // аббревиатура: «ИНН», а не «инн» из корпуса
+                }
 
         foreach (var (key, form, score) in Extra.ByPrefix(prefix))
             if (key.Length > prefix.Length && ScriptOf(key) == script)
@@ -193,8 +226,11 @@ public sealed class PredictionEngine
         foreach (var (key, st) in User.ByPrefix(prefix))
         {
             if (key.Length <= prefix.Length || ScriptOf(key) != script) continue;
-            // Незнакомое словарю слово, встреченное один раз, — скорее опечатка: предлагаем со второго употребления
-            if (st.Count < 2 && (model is null || model.Find(key) < 0)) continue;
+            // Незнакомое словарю слово, встреченное один раз, предлагаем сразу, если оно не похоже на опечатку
+            // частого слова (термины, имена, названия); иначе — со второго употребления
+            if (st.Count < 2 && (model is null || model.Find(key) < 0) && !Supplement.Contains(key)
+                && (key.Length < 4 || model is not null && Corrector.Find(model, key, prefixMode: false, max: 1).Count > 0))
+                continue;
             var c = Get(key, st.Form);
             c.Form = st.Form;
             double rec = Recency(now, st.LastUsed);
@@ -204,18 +240,22 @@ public sealed class PredictionEngine
             if (u2 > 0) c.UserCtx += 0.65 * User.Trigram(p2, p1, key) / (u2 + 2) * rec;
         }
 
-        double liftPow = model?.Language == "ru" ? 0.8 : 0.4;
+        double liftPow = model?.Language == "ru" ? LiftPowRu : LiftPowEn;
+        int ci1 = p1 is null || model is null ? -1 : model.Find(p1);
+        int ci2 = p2 is null || model is null || ci1 < 0 ? -1 : model.Find(p2);
         return cands
             .Select(kv =>
             {
                 var c = kv.Value;
-                double lift = p1 is not null && model is not null ? model.SuffixLift(p1, kv.Key) : 1;
-                double score = (WUserCtx * c.UserCtx + WBaseCtx * c.BaseCtx) * Math.Pow(lift, liftPow * 0.4)
+                double lift = p1 is null || model is null ? 1 : model.ContextSuffixLift(ci1, ci2, p1, kv.Key);
+                if (p2 is not null && model is not null) lift *= Math.Pow(model.SkipSuffixLift(p2, kv.Key), SkipLiftPow);
+                double score = (WUserCtx * c.UserCtx + WBaseCtx * c.BaseCtx) * Math.Pow(lift, liftPow * CtxLiftShare)
                              + (WBaseUni * c.BaseUni + WUserUni * c.UserUni) * Math.Pow(lift, liftPow);
                 score *= 1 + 0.03 * Math.Min(kv.Key.Length - prefix.Length, 8);
                 return (kv.Key, c.Form, Score: score);
             })
             .Where(x => x.Score > 0 && x.Key.Length > prefix.Length && (!Profanity.IsObscene(x.Key) || OwnWord(x.Key)))
+            .Where(x => minWeak <= 0 || x.Score >= minWeak || cands[x.Key] is { UserUni: > 0 } or { UserCtx: > 0 })
             .OrderByDescending(x => x.Score)
             .ThenBy(x => x.Key.Length)
             // Слово корпуса без поддержки контекста, у которого есть намного более частый «сосед» в одну букву, —
@@ -231,7 +271,7 @@ public sealed class PredictionEngine
     private bool OwnWord(string key) => (User.Get(key)?.Count ?? 0) >= 2;
 
     /// <summary>Исправления опечатки в набранном слове (или префиксе), если слово не знакомо пользователю.</summary>
-    private List<(string Key, string Form)> Corrections(string typed, LanguageModel? model, bool prefixMode)
+    private List<(string Key, string Form, double Score)> Corrections(string typed, LanguageModel? model, bool prefixMode)
     {
         if (model is null || typed.Length < 3 || !typed.All(char.IsLetter)) return [];
         var key = CaseHelper.Normalize(typed);
@@ -240,7 +280,7 @@ public sealed class PredictionEngine
                 ? User.ByPrefix(key).Any(x => x.Stat.Count >= 2) || Extra.ByPrefix(key).Any() || Supplement.ByPrefix(key).Any()
                 : (User.Get(key)?.Count ?? 0) >= 2 || Extra.Contains(key) || Supplement.Contains(key))
             return [];
-        return Corrector.Find(model, key, prefixMode, extra: Supplement).Select(c => (c.Key, c.Form)).ToList();
+        return Corrector.Find(model, key, prefixMode, extra: Supplement);
     }
 
     private static IEnumerable<int> TopByUnigram(LanguageModel model, int from, int to, int prefixLen)
@@ -288,9 +328,11 @@ public sealed class PredictionEngine
         var script = ScriptOf(ctx.Prev1!);
         var scores = new Dictionary<string, (string Form, double Score)>(StringComparer.Ordinal);
 
-        void Add(string key, string form, double s)
+        void Add(string key, string form, double s, bool own = false)
         {
             if (key.Length < 3 || key == p1 || ScriptOf(key) != script) return; // короткие слова быстрее напечатать
+            // Имена собственные из корпуса (в новостях их много) следующим словом не предлагаем — только свои
+            if (!own && char.IsUpper(form[0]) && !form.Skip(1).Any(char.IsUpper)) return;
             if (Profanity.IsObscene(key) && !OwnWord(key)) return;
             scores[key] = scores.TryGetValue(key, out var cur) ? (cur.Form, cur.Score + s) : (form, s);
         }
@@ -320,13 +362,13 @@ public sealed class PredictionEngine
         double u1 = User.ContextTotal(p1);
         if (u1 > 0)
             foreach (var (k, c) in User.Followers(p1))
-                if (c >= minCount && Known(k)) Add(k, User.Get(k)?.Form ?? k, WUserCtx * 0.35 * c / (u1 + 2) * Recency(now, User.Get(k)?.LastUsed ?? 0));
+                if (c >= minCount && Known(k)) Add(k, User.Get(k)?.Form ?? k, WUserCtx * 0.35 * c / (u1 + 2) * Recency(now, User.Get(k)?.LastUsed ?? 0), own: true);
         if (p2 is not null)
         {
             double u2 = User.ContextTotal(p2, p1);
             if (u2 > 0)
                 foreach (var (k, c) in User.Followers(p2, p1))
-                    if (c >= minCount && Known(k)) Add(k, User.Get(k)?.Form ?? k, WUserCtx * 0.65 * c / (u2 + 2) * Recency(now, User.Get(k)?.LastUsed ?? 0));
+                    if (c >= minCount && Known(k)) Add(k, User.Get(k)?.Form ?? k, WUserCtx * 0.65 * c / (u2 + 2) * Recency(now, User.Get(k)?.LastUsed ?? 0), own: true);
         }
 
         bool Known(string k) => (User.Get(k)?.Count ?? 0) >= 2 || (model ?? ModelFor(script))?.Find(k) >= 0;

@@ -100,9 +100,50 @@ public static class CaseHelper
     {
         if (candidate.Length == 0 || !char.IsLower(candidate[0])) return candidate;
         if (candidate.Skip(1).Any(char.IsUpper)) return candidate;
-        if (capitalize || typed.Length > 0 && char.IsUpper(typed[0]))
+        if (capitalize || typed.Length > 0 && char.IsUpper(typed[0]) || IsInverted(typed))
             return char.ToUpperInvariant(candidate[0]) + candidate[1..];
         return candidate;
+    }
+
+    /// <summary>«пРИВЕТ», «дА»: включён CapsLock и первая буква набрана с Shift — имелась в виду заглавная.</summary>
+    public static bool IsInverted(string w)
+    {
+        if (w.Length < 2 || !char.IsLower(w[0])) return false;
+        bool any = false;
+        for (int i = 1; i < w.Length; i++)
+        {
+            if (!char.IsLetter(w[i])) continue;
+            if (!char.IsUpper(w[i])) return false;
+            any = true;
+        }
+        return any;
+    }
+
+    /// <summary>Все буквы заглавные (не меньше двух).</summary>
+    public static bool IsAllCaps(string w)
+    {
+        int letters = 0;
+        foreach (var c in w)
+        {
+            if (!char.IsLetter(c)) continue;
+            if (!char.IsUpper(c)) return false;
+            letters++;
+        }
+        return letters >= 2;
+    }
+
+    /// <summary>
+    /// Регистр слова для личного словаря. Капс почти всегда случайный (CapsLock, сбой отслеживания): «ЧЕРЕЗ» → «через»,
+    /// «дА» → «Да». Капсом остаются аббревиатуры: известные словарю («ИНН») и короткие незнакомые («СНИЛС»).
+    /// </summary>
+    /// <param name="knownForm">Словарная форма по нормализованному ключу или null, если слово неизвестно.</param>
+    public static string CleanCase(string word, Func<string, string?>? knownForm)
+    {
+        if (IsInverted(word)) return char.ToUpperInvariant(word[0]) + word[1..].ToLowerInvariant();
+        if (!IsAllCaps(word)) return word;
+        var form = knownForm?.Invoke(Normalize(word));
+        if (form is not null) return form.Skip(1).Any(char.IsUpper) ? form : form.ToLowerInvariant();
+        return word.Count(char.IsLetter) <= 5 ? word : word.ToLowerInvariant();
     }
 
     public static string Normalize(string s) => s.ToLowerInvariant().Replace('ё', 'е');

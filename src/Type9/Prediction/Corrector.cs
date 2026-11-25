@@ -113,6 +113,9 @@ public static class Corrector
             // Само исправленное слово…
             int exact = model.Find(v);
             double exactScore = exact >= 0 ? model.Unigram(exact) * weight : 0;
+            // Слово делового словаря считается не реже его «плоской» частоты (в корпусе оно бывает редким)
+            var extraForm = extra?.FormOf(v);
+            if (extraForm is not null) exactScore = Math.Max(exactScore, PredictionEngine.SupplementFreq * weight);
             // …а пока слово набирается — и самое частое слово с таким началом (с понижением: это уже догадка);
             // из двух берём более вероятное, чтобы одна правка не давала два варианта
             if (prefixMode && v.Length >= 4)
@@ -124,8 +127,8 @@ public static class Corrector
                     continue;
                 }
             }
-            if (exact >= 0) Consider(model.Key(exact), model.Form(exact), exactScore);
-            else if (extra?.FormOf(v) is { } form) Consider(v, form, PredictionEngine.SupplementFreq * weight);
+            if (extraForm is not null) Consider(v, extraForm, exactScore);
+            else if (exact >= 0) Consider(model.Key(exact), model.Form(exact), exactScore);
         }
 
         void Consider(string key, string form, double score)

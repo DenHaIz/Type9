@@ -75,7 +75,7 @@ internal static class Autostart
             if (mode == RunMode.Normal)
             {
                 SetRunKey(true);
-                if (TaskExists() && Elevation.IsElevated) DeleteTask();
+                if (Elevation.IsElevated && TaskExists()) DeleteTask(); // без прав задачу не удалить — schtasks не запускаем
                 return null;
             }
 
@@ -149,9 +149,14 @@ internal static class Autostart
             CreateNoWindow = true, UseShellExecute = false,
             RedirectStandardOutput = true, RedirectStandardError = true,
         })!;
-        p.StandardOutput.ReadToEnd();
-        p.StandardError.ReadToEnd();
-        p.WaitForExit(10_000);
+        var stdout = p.StandardOutput.ReadToEndAsync();
+        var stderr = p.StandardError.ReadToEndAsync();
+        if (!p.WaitForExit(10_000))
+        {
+            try { p.Kill(); } catch { /* уже завершился */ }
+            return -1;
+        }
+        Task.WaitAll(stdout, stderr);
         return p.ExitCode;
     }
 }

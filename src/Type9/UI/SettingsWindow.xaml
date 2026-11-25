@@ -145,14 +145,17 @@
                 </StackPanel>
 
                 <Grid x:Name="SectionHost" Grid.Row="1">
-                    <!-- Мягкое затухание контента у верхнего края при прокрутке -->
-                    <Grid.OpacityMask>
-                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1" MappingMode="RelativeToBoundingBox">
-                            <GradientStop Color="#00000000" Offset="0" />
-                            <GradientStop Color="#FF000000" Offset="0.025" />
-                            <GradientStop Color="#FF000000" Offset="1" />
-                        </LinearGradientBrush>
-                    </Grid.OpacityMask>
+                    <!-- Мягкое затухание контента у верхнего края при прокрутке — узкая полоска цвета фона поверх
+                         (маска на всю область заставляла перерисовывать раздел целиком в отдельном слое) -->
+                    <Rectangle Panel.ZIndex="10" Height="16" VerticalAlignment="Top" Margin="0,0,14,0" IsHitTestVisible="False"
+                               Fill="{DynamicResource B.Bg}">
+                        <Rectangle.OpacityMask>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                <GradientStop Color="#FF000000" Offset="0" />
+                                <GradientStop Color="#00000000" Offset="1" />
+                            </LinearGradientBrush>
+                        </Rectangle.OpacityMask>
+                    </Rectangle>
 
                     <!-- ============ ОБЩИЕ ============ -->
                     <ScrollViewer x:Name="SecGeneral" Tag="general" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
@@ -761,6 +764,7 @@
                                         <Button Content="{DynamicResource S.Ab.Exit}" Click="Exit_Click" Margin="0,0,6,6" />
                                     </WrapPanel>
                                     <TextBlock Style="{StaticResource T.Muted}" Margin="0,8,0,0" Text="{DynamicResource S.Ab.DictHint}" />
+                                    <TextBlock Style="{StaticResource T.Muted}" Margin="0,6,0,0" TextWrapping="Wrap" Text="{DynamicResource S.Ab.Sources}" />
                                 </StackPanel>
                             </Border>
                         </StackPanel>

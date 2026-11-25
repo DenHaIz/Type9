@@ -30,6 +30,9 @@ public sealed class UserModel
 
     public static long NowMinutes() => DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 60;
 
+    /// <summary>Словарная форма слова по ключу (языковая модель, деловой словарь) — чтобы не запоминать капс.</summary>
+    public Func<string, string?>? KnownForm { get; set; }
+
     public static bool IsLearnable(string word) =>
         word.Length >= 2 && word.Length <= 40 && word.Any(char.IsLetter) && !word.Any(char.IsDigit);
 
@@ -37,16 +40,17 @@ public sealed class UserModel
     {
         if (!w.Learnable || !IsLearnable(w.Word)) return;
         var key = CaseHelper.Normalize(w.Word);
+        if (w.Tentative && !_words.ContainsKey(key) && KnownForm?.Invoke(key) is null) return;
 
         if (!_words.TryGetValue(key, out var st))
         {
-            st = new WordStat { Form = PickForm(w.Word, w.SentenceStart, null) };
+            st = new WordStat { Form = PickForm(w.Word, w.SentenceStart, null, KnownForm) };
             _words[key] = st;
             _index.Add(key);
         }
         else
         {
-            st.Form = PickForm(w.Word, w.SentenceStart, st.Form);
+            st.Form = PickForm(w.Word, w.SentenceStart, st.Form, KnownForm);
         }
         st.Count++;
         TotalCount++;
@@ -63,10 +67,15 @@ public sealed class UserModel
         Version++;
     }
 
-    /// <summary>Форма для показа: аббревиатуры и имена собственные сохраняем как есть, остальное — строчными.</summary>
-    private static string PickForm(string word, bool sentenceStart, string? existing)
+    /// <summary>
+    /// Форма для показа: аббревиатуры и имена собственные сохраняем как есть, остальное — строчными.
+    /// Случайный капс («ЧЕРЕЗ», «дА») сначала приводится к обычному виду.
+    /// </summary>
+    internal static string PickForm(string word, bool sentenceStart, string? existing, Func<string, string?>? knownForm = null)
     {
+        word = CaseHelper.CleanCase(word, knownForm);
         if (existing is { Length: 0 }) existing = null;
+        if (existing is not null) existing = CaseHelper.CleanCase(existing, knownForm);
         bool innerUpper = word.Skip(1).Any(char.IsUpper);
         if (innerUpper) return word;                          // ООО, iPhone
         if (char.IsUpper(word[0]))
@@ -74,6 +83,21 @@ public sealed class UserModel
         return existing is not null && char.IsUpper(existing[0]) && !existing.Skip(1).Any(char.IsUpper)
             ? word // слово встретилось строчным — значит, это не имя собственное
             : existing ?? word;
+    }
+
+    /// <summary>Чинит формы, сохранённые прежними версиями капсом («ЧЕРЕЗ» → «через»). Возвращает число исправленных.</summary>
+    public int FixForms()
+    {
+        int n = 0;
+        foreach (var st in _words.Values)
+        {
+            var f = CaseHelper.CleanCase(st.Form, KnownForm);
+            if (f == st.Form) continue;
+            st.Form = f;
+            n++;
+        }
+        if (n > 0) { Dirty = true; Version++; }
+        return n;
     }
 
     private static void Inc(Dictionary<string, Dictionary<string, int>> map, string ctx, string next, int by = 1)
@@ -118,19 +142,54 @@ public sealed class UserModel
     public IEnumerable<KeyValuePair<string, int>> Followers(string p2Key, string p1Key) =>
         _trigrams.TryGetValue(p2Key + " " + p1Key, out var m) ? m : [];
 
-    public IEnumerable<(string Form, int Count, long LastUsed)> AllWords() =>
-        _words.Values.Select(s => (s.Form, s.Count, s.LastUsed));
+    /// <summary>Все слова: нормализованный ключ, форма для показа, число употреблений.</summary>
+    public IEnumerable<(string Key, string Form, int Count, long LastUsed)> AllWords() =>
+        _words.Select(kv => (kv.Key, kv.Value.Form, kv.Value.Count, kv.Value.LastUsed));
 
-    public void Remove(string word)
+    public void Remove(string word) => RemoveMany([word]);
+
+    /// <summary>Удаляет слова и все сочетания с ними — одним проходом по n-граммам (удаление сотен слов не подвешивает UI).</summary>
+    public void RemoveMany(IEnumerable<string> words)
     {
-        var key = CaseHelper.Normalize(word);
-        if (!_words.Remove(key, out var removed)) return;
-        TotalCount -= removed.Count;
-        _index.Remove(key);
-        _bigrams.Remove(key);
-        foreach (var m in _bigrams.Values) m.Remove(key);
-        foreach (var k in _trigrams.Keys.Where(k => k.Split(' ').Contains(key)).ToList()) _trigrams.Remove(k);
-        foreach (var m in _trigrams.Values) m.Remove(key);
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var w in words)
+        {
+            var key = CaseHelper.Normalize(w);
+            if (!_words.Remove(key, out var removed)) continue;
+            TotalCount -= removed.Count;
+            _index.Remove(key);
+            _bigrams.Remove(key);
+            keys.Add(key);
+        }
+        if (keys.Count == 0) return;
+        foreach (var m in _bigrams.Values)
+            foreach (var k in m.Keys.Where(keys.Contains).ToList()) m.Remove(k);
+        foreach (var k in _trigrams.Keys.Where(k => k.Split(' ').Any(keys.Contains)).ToList()) _trigrams.Remove(k);
+        foreach (var m in _trigrams.Values)
+            foreach (var k in m.Keys.Where(keys.Contains).ToList()) m.Remove(k);
+        Dirty = true;
+        Version++;
+    }
+
+    /// <summary>Добавляет к словарю другую модель (обучение на тексте / импорт, подготовленные в фоне): счётчики суммируются.</summary>
+    public void MergeFrom(UserModel other)
+    {
+        foreach (var (key, o) in other._words)
+        {
+            if (!_words.TryGetValue(key, out var st))
+            {
+                _words[key] = st = new WordStat { Form = o.Form };
+                _index.Add(key);
+            }
+            else st.Form = PickForm(o.Form, false, st.Form, KnownForm);
+            st.Count += o.Count;
+            TotalCount += o.Count;
+            st.LastUsed = Math.Max(st.LastUsed, o.LastUsed);
+        }
+        foreach (var (ctx, m) in other._bigrams)
+            foreach (var (next, c) in m) Inc(_bigrams, ctx, next, c);
+        foreach (var (ctx, m) in other._trigrams)
+            foreach (var (next, c) in m) Inc(_trigrams, ctx, next, c);
         Dirty = true;
         Version++;
     }

@@ -104,7 +104,12 @@ public partial class App : Application
         UiWatchdog.Start(Dispatcher);
         _instance.Listen(() => Dispatcher.BeginInvoke(() => _controller?.ShowSettings()));
 
-        if (settings.Autostart) _controller.ApplyAutostart();
+        // Сверка автозапуска (реестр, иногда schtasks) — в фоне: запуск процесса не задерживает старт
+        if (settings.Autostart)
+        {
+            var mode = settings.Mode;
+            Task.Run(() => Autostart.Apply(true, mode));
+        }
 
         if (!settingsExisted)
         {

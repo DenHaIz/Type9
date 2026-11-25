@@ -23,7 +23,9 @@ public sealed class LanguageModel
     private float[] _uni = [];        // вероятность слова
     private float[] _ctxTotal = [];   // сколько раз слово было контекстом (знаменатель для биграмм)
     private Dictionary<int, string> _forms = [];
-    private long[] _biKeys = [];
+    // Биграммы компактно: продолжения слова a — _biNext[_biStart[a].._biStart[a+1]] (по возрастанию id)
+    private int[] _biStart = [];
+    private int[] _biNext = [];
     private ushort[] _biCnt = [];
     private long[] _triKeys = [];
     private ushort[] _triCnt = [];
@@ -35,6 +37,15 @@ public sealed class LanguageModel
     private long[] _sufKeys = [];
     private int[] _sufCnt = [];
     private float[] _classTotal = [];
+    private int[] _wordSuf = [];
+    private Dictionary<string, int> _classes2 = [];   // класс слова через одно → окончание кандидата
+    private long[] _sufKeys2 = [];
+    private int[] _sufCnt2 = [];
+    private float[] _classTotal2 = [];      // id окончания (2 последние буквы) каждого слова словаря, -1 — нет
+
+    // Профили окончаний после конкретного слова / пары слов (по их продолжениям в корпусе) — кеш
+    private readonly Dictionary<long, (Dictionary<int, float> Counts, float Total)> _profiles = [];
+    private readonly object _profilesLock = new();
 
     public static LanguageModel? LoadEmbedded(string lang)
     {
@@ -51,7 +62,7 @@ public sealed class LanguageModel
         using var br = new BinaryReader(new BufferedStream(gz, 1 << 16), Encoding.UTF8);
         if (Encoding.ASCII.GetString(br.ReadBytes(4)) != "T9LM") throw new InvalidDataException("Не файл модели Type9");
         int version = br.ReadInt32();
-        if (version != 1) throw new InvalidDataException($"Неизвестная версия модели {version}");
+        if (version is not (1 or 2)) throw new InvalidDataException($"Неизвестная версия модели {version}");
         var lang = br.ReadString();
         int n = br.ReadInt32();
         long total = br.ReadInt64();
@@ -90,8 +101,19 @@ public sealed class LanguageModel
         }
 
         int nb = Count(br, 50_000_000);
-        var bk = new long[nb];
-        for (int i = 0; i < nb; i++) bk[i] = br.ReadInt64();
+        var biStart = new int[n + 1];
+        var biNext = new int[nb];
+        long prevKey = -1;
+        for (int i = 0; i < nb; i++)
+        {
+            long k = br.ReadInt64();
+            int a = (int)(k >> Shift), b = (int)(k & Mask);
+            if (k <= prevKey || (uint)a >= (uint)n || (uint)b >= (uint)n) throw new InvalidDataException("Повреждённая модель: биграммы");
+            prevKey = k;
+            biNext[i] = b;
+            biStart[a + 1]++;
+        }
+        for (int i = 0; i < n; i++) biStart[i + 1] += biStart[i];
         var bc = new ushort[nb];
         for (int i = 0; i < nb; i++) bc[i] = br.ReadUInt16();
 
@@ -128,12 +150,41 @@ public sealed class LanguageModel
             classTotal[cls] += sc[i];
         }
 
-        return new LanguageModel
+        // Версия 2: окончания через слово
+        var classes2 = new Dictionary<string, int>(StringComparer.Ordinal);
+        long[] sk2 = [];
+        int[] sc2 = [];
+        var classTotal2 = Array.Empty<float>();
+        if (version >= 2)
         {
+            int nc2 = Count(br, 1 << Shift);
+            for (int i = 0; i < nc2; i++) classes2[br.ReadString()] = i;
+            int ne2 = Count(br, 50_000_000);
+            sk2 = new long[ne2];
+            sc2 = new int[ne2];
+            classTotal2 = new float[nc2];
+            for (int i = 0; i < ne2; i++)
+            {
+                sk2[i] = br.ReadInt64();
+                sc2[i] = br.ReadInt32();
+                int cls = (int)(sk2[i] >> Shift);
+                if ((uint)cls >= (uint)nc2 || (sk2[i] & Mask) >= nsuf || (i > 0 && sk2[i] < sk2[i - 1]))
+                    throw new InvalidDataException("Повреждённая модель: таблица окончаний через слово");
+                classTotal2[cls] += sc2[i];
+            }
+        }
+
+        var m = new LanguageModel
+        {
+            _classes2 = classes2, _sufKeys2 = sk2, _sufCnt2 = sc2, _classTotal2 = classTotal2,
             Language = lang, Count = n, _blob = sb.ToString(), _offsets = offsets, _uni = uni, _forms = forms, _ctxTotal = ctx,
-            _biKeys = bk, _biCnt = bc, _triKeys = tk, _triCnt = tc,
+            _biStart = biStart, _biNext = biNext, _biCnt = bc, _triKeys = tk, _triCnt = tc,
             _classes = classes, _suffixes = suffixes, _sufProb = sufProb, _sufKeys = sk, _sufCnt = sc, _classTotal = classTotal,
         };
+        m._wordSuf = new int[n];
+        for (int i = 0; i < n; i++)
+            m._wordSuf[i] = suffixes.TryGetValue(NextSuffix(m.KeySpan(i)), out var sid) ? sid : -1;
+        return m;
     }
 
     // ------------------------------------------------------------------ словарь
@@ -185,9 +236,8 @@ public sealed class LanguageModel
 
     public int Bigram(int a, int b)
     {
-        long k = ((long)a << Shift) | (uint)b;
-        int i = Lower(_biKeys, k);
-        return i < _biKeys.Length && _biKeys[i] == k ? _biCnt[i] : 0;
+        int i = Array.BinarySearch(_biNext, _biStart[a], _biStart[a + 1] - _biStart[a], b);
+        return i >= 0 ? _biCnt[i] : 0;
     }
 
     public int Trigram(int a, int b, int c)
@@ -200,9 +250,8 @@ public sealed class LanguageModel
     /// <summary>Все продолжения слова a: (id, count).</summary>
     public IEnumerable<(int Id, int Count)> Followers(int a)
     {
-        long start = (long)a << Shift, end = (long)(a + 1) << Shift;
-        for (int i = Lower(_biKeys, start); i < _biKeys.Length && _biKeys[i] < end; i++)
-            yield return ((int)(_biKeys[i] & Mask), _biCnt[i]);
+        for (int i = _biStart[a], end = _biStart[a + 1]; i < end; i++)
+            yield return (_biNext[i], _biCnt[i]);
     }
 
     /// <summary>Все продолжения пары (a, b).</summary>
@@ -217,11 +266,67 @@ public sealed class LanguageModel
 
     public static string PrevClass(string w) => w.Length <= 3 ? w : w[^3..];
     public static string NextSuffix(string w) => w.Length <= 2 ? w : w[^2..];
+    private static string NextSuffix(ReadOnlySpan<char> w) => (w.Length <= 2 ? w : w[^2..]).ToString();
 
     /// <summary>
     /// Насколько окончание слова-кандидата типично после предыдущего слова (>1 — типичнее среднего).
     /// Так «этом» → «месте», «с» → «коллегами», «для» → «работы».
     /// </summary>
+    /// <summary>
+    /// Типичность окончания кандидата после <b>этих</b> слов: по тому, какие окончания у их продолжений в корпусе
+    /// («согласно» → «-у/-ю», «в соответствии с» → «-ми/-ом»). Работает и для слов, которых нет среди продолжений;
+    /// редкий контекст сглаживается моделью классов (<see cref="SuffixLift"/>).
+    /// </summary>
+    /// <param name="i2">Слово перед предыдущим (или −1).</param>
+    public double ContextSuffixLift(int i1, int i2, string prevKey, string candKey)
+    {
+        double classLift = SuffixLift(prevKey, candKey);
+        if (i1 < 0 || !_suffixes.TryGetValue(NextSuffix(candKey), out var suf)) return classLift;
+        var (counts, total) = Profile(i2 >= 0 && Bigram(i2, i1) >= 8 ? ((long)i2 << Shift) | (uint)i1 | (1L << 62) : i1, i1, i2);
+        if (total < 3) return classLift;
+        // Сглаживание: профиль контекста + α «виртуальных» наблюдений из модели классов
+        const double alpha = 12;
+        double marg = Math.Max(_sufProb[suf], 1e-6);
+        double p = (counts.GetValueOrDefault(suf) + alpha * classLift * marg) / (total + alpha);
+        return Math.Clamp(p / marg, 0.03, 30);
+    }
+
+    private (Dictionary<int, float> Counts, float Total) Profile(long cacheKey, int i1, int i2)
+    {
+        lock (_profilesLock)
+            if (_profiles.TryGetValue(cacheKey, out var hit)) return hit;
+        var counts = new Dictionary<int, float>();
+        float total = 0;
+        var followers = (cacheKey & (1L << 62)) != 0 ? Followers(i2, i1) : Followers(i1);
+        foreach (var (id, cnt) in followers)
+        {
+            int s = _wordSuf[id];
+            if (s < 0) continue;
+            counts[s] = counts.GetValueOrDefault(s) + cnt;
+            total += cnt;
+        }
+        lock (_profilesLock)
+        {
+            if (_profiles.Count > 512) _profiles.Clear();
+            _profiles[cacheKey] = (counts, total);
+        }
+        return (counts, total);
+    }
+
+    /// <summary>Типичность окончания кандидата по слову через одно («поиском и возможност<b>ью</b>»); 1 — нет данных.</summary>
+    public double SkipSuffixLift(string prev2Key, string candKey)
+    {
+        if (!_classes2.TryGetValue(PrevClass(prev2Key), out var cls)) return 1;
+        if (!_suffixes.TryGetValue(NextSuffix(candKey), out var suf)) return 1;
+        double total = _classTotal2[cls];
+        if (total < 50) return 1;
+        long k = ((long)cls << Shift) | (uint)suf;
+        int i = Lower(_sufKeys2, k);
+        int c = i < _sufKeys2.Length && _sufKeys2[i] == k ? _sufCnt2[i] : 0;
+        double p = (c + 0.5) / (total + 0.5 * _suffixes.Count);
+        return Math.Clamp(p / Math.Max(_sufProb[suf], 1e-6), 0.05, 20);
+    }
+
     public double SuffixLift(string prevKey, string candKey)
     {
         if (!_classes.TryGetValue(PrevClass(prevKey), out var cls)) return 1;

@@ -18,7 +18,7 @@ internal sealed class CaretLocator : IDisposable
     private readonly Thread _thread;
     private readonly AutoResetEvent _signal = new(false);
     private readonly int _ownPid = Environment.ProcessId;
-    private (int Version, Action<int, CaretInfo> Callback)? _pending;
+    private readonly List<(int Version, Action<int, CaretInfo> Callback)> _pending = [];
     private volatile bool _stop;
 
     private IntPtr _uiaFailedHwnd;
@@ -42,9 +42,18 @@ internal sealed class CaretLocator : IDisposable
     public void NoteClick(Win32.POINT pt) =>
         _lastClick = new Anchor(IntPtr.Zero, new Win32.RECT { Left = pt.X, Top = pt.Y - 9, Right = pt.X + 1, Bottom = pt.Y + 11 }, Environment.TickCount64);
 
+    /// <summary>
+    /// Запрос позиции каретки. Из запросов подсказок (version ≥ 0) нужен только самый свежий; служебные
+    /// (меню, проверка поля) не вытесняются ими — все ожидающие получат результат одного определения.
+    /// </summary>
     public void Request(int version, Action<int, CaretInfo> callback)
     {
-        lock (_signal) _pending = (version, callback);
+        lock (_signal)
+        {
+            if (version >= 0) _pending.RemoveAll(p => p.Version >= 0);
+            _pending.Add((version, callback));
+            if (_pending.Count > 8) _pending.RemoveAt(0);
+        }
         _signal.Set();
     }
 
@@ -54,9 +63,9 @@ internal sealed class CaretLocator : IDisposable
         {
             _signal.WaitOne();
             if (_stop) break;
-            (int Version, Action<int, CaretInfo> Callback)? req;
-            lock (_signal) { req = _pending; _pending = null; }
-            if (req is not { } r) continue;
+            (int Version, Action<int, CaretInfo> Callback)[] reqs;
+            lock (_signal) { reqs = [.. _pending]; _pending.Clear(); }
+            if (reqs.Length == 0) continue;
 
             CaretInfo info;
             try { info = Locate(); }
@@ -65,7 +74,7 @@ internal sealed class CaretLocator : IDisposable
                 Log.Error("CaretLocator", ex);
                 info = Fallback(Win32.GetForegroundWindow(), IntPtr.Zero, false);
             }
-            _ui.BeginInvoke(() => r.Callback(r.Version, info));
+            _ui.BeginInvoke(() => { foreach (var r in reqs) r.Callback(r.Version, info); });
         }
     }
 

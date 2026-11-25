@@ -222,6 +222,8 @@ public static class Loc
         ["Ab.Exit"] = ("Выйти из программы", "Quit Type9"),
         ["Ab.DictHint"] = ("Дополнительные частотные словари можно положить в папку данных\\dict (по слову в строке, от частых к редким).",
                            "Extra frequency dictionaries can be placed in the data folder\\dict (one word per line, most frequent first)."),
+        ["Ab.Sources"] = ("Словари собраны из открытых корпусов: OpenSubtitles (FrequencyWords, CC BY-SA 4.0), Tatoeba (CC BY 2.0 FR), Leipzig Corpora Collection (wortschatz.uni-leipzig.de).",
+                          "Dictionaries are built from open corpora: OpenSubtitles (FrequencyWords, CC BY-SA 4.0), Tatoeba (CC BY 2.0 FR), Leipzig Corpora Collection (wortschatz.uni-leipzig.de)."),
         ["C.Tab"] = ("вставить подсказку", "insert the suggestion"),
         ["C.Arrows"] = ("выбрать другой вариант", "choose another variant"),
         ["C.Esc"] = ("скрыть подсказку", "hide the suggestion"),

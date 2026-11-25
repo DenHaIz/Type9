@@ -14,7 +14,10 @@ public readonly record struct TypingContext(string Word, string? Prev1, string? 
 
 /// <summary>Слово, завершённое вводом разделителя (пробел, знак препинания, Enter).</summary>
 /// <param name="Learnable">false — часть адреса/почты/пути или смесь алфавитов: такое не запоминаем.</param>
-public readonly record struct CompletedWord(string Word, string? Prev1, string? Prev2, bool SentenceStart, bool Learnable = true);
+/// <param name="Tentative">Слово оборвано кликом/сменой поля, а не разделителем: могло быть недописано —
+/// запоминаем, только если оно уже известно (словарю или пользователю).</param>
+public readonly record struct CompletedWord(string Word, string? Prev1, string? Prev2, bool SentenceStart, bool Learnable = true,
+    bool Tentative = false);
 
 /// <summary>
 /// Держит хвост набранного текста с момента последнего сброса (клик, навигация, смена окна)

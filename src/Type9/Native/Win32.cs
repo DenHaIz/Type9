@@ -262,6 +262,33 @@ internal static class Win32
 
     public static bool IsKeyDown(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
 
+    private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc proc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr hwnd, uint cmd);
+
+    /// <summary>Процессы, у которых есть видимые окна верхнего уровня без владельца (то, что видно на панели задач).</summary>
+    public static HashSet<uint> VisibleTopLevelProcessIds()
+    {
+        var pids = new HashSet<uint>();
+        EnumWindows((h, _) =>
+        {
+            if (IsWindowVisible(h) && GetWindow(h, 4 /* GW_OWNER */) == IntPtr.Zero)
+            {
+                GetWindowThreadProcessId(h, out var pid);
+                pids.Add(pid);
+            }
+            return true;
+        }, IntPtr.Zero);
+        return pids;
+    }
+
     public static MONITORINFO GetMonitorInfoAt(int x, int y)
     {
         var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };

@@ -516,13 +516,20 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ContextMenu">
-                    <Border Margin="12" Background="{DynamicResource B.Surface}" BorderBrush="{DynamicResource B.Line}" BorderThickness="1"
-                            CornerRadius="10" Padding="4" MinWidth="200">
-                        <Border.Effect>
-                            <DropShadowEffect BlurRadius="18" ShadowDepth="3" Opacity="0.35" Color="{DynamicResource C.Shadow}" />
-                        </Border.Effect>
-                        <ItemsPresenter />
-                    </Border>
+                    <!-- Тень — у отдельной подложки: подсветка пунктов при наведении не пересчитывает размытие -->
+                    <Grid Margin="12" MinWidth="200">
+                        <Border Background="{DynamicResource B.Surface}" CornerRadius="10">
+                            <Border.Effect>
+                                <DropShadowEffect BlurRadius="18" ShadowDepth="3" Opacity="0.35" Color="{DynamicResource C.Shadow}" />
+                            </Border.Effect>
+                        </Border>
+                        <Border Background="{DynamicResource B.Surface}" BorderBrush="{DynamicResource B.Line}" BorderThickness="1"
+                                CornerRadius="10" Padding="4">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False">
+                                <ItemsPresenter />
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>

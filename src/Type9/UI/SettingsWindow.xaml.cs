@@ -10,6 +10,7 @@ using System.Windows.Shapes;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using Type9.Core;
+using Type9.Prediction;
 using Type9.Themes;
 
 namespace Type9.UI;
@@ -216,10 +217,12 @@ internal partial class SettingsWindow : Window
         _currentSection = target;
         UiWatchdog.Context = "настройки: " + section;
         target.Visibility = Visibility.Visible;
-        Anim.Play(target, 12);
+        // При программной отрисовке (удалённый рабочий стол) прозрачность всего раздела — дорогой слой: только сдвиг
+        if (SoftwareRendering) Anim.Slide(target, 12);
+        else Anim.Play(target, 12);
 
         if (section == "about") { _logoStep = 0; _logoTimer.Start(); }
-        if (section == "dict") RefreshWords();
+        if (section == "dict" && _wordsDirty) RefreshWords();
         if (section == "phrases") RefreshPreview();
     }
 
@@ -576,17 +579,26 @@ internal partial class SettingsWindow : Window
 
     // ------------------------------------------------------------------ словарь
 
+    private bool _wordsDirty = true;
+
+    /// <summary>Список выученных слов (до 2000 самых частых). Пока раздел скрыт — только помечаем, что список устарел.</summary>
     private void RefreshWords()
     {
         if (WordList is null) return;
+        if (_section != "dict") { _wordsDirty = true; return; }
+        _wordsDirty = false;
         var user = _app.Prediction.User;
         var q = Input.CaseHelper.Normalize(DictSearch.Text.Trim());
-        var rows = user.AllWords()
-            .Where(w => q.Length == 0 || Input.CaseHelper.Normalize(w.Form).Contains(q))
-            .OrderByDescending(w => w.Count)
-            .Take(2000)
-            .Select(w => new WordRow(w.Form, w.Count))
-            .ToList();
+        var top = new PriorityQueue<(string Form, int Count), int>(2001);
+        foreach (var w in user.AllWords())
+        {
+            if (q.Length > 0 && !w.Key.Contains(q, StringComparison.Ordinal)) continue;
+            top.Enqueue((w.Form, w.Count), w.Count);
+            if (top.Count > 2000) top.Dequeue();
+        }
+        var rows = new List<WordRow>(top.Count);
+        while (top.Count > 0) { var (f, c) = top.Dequeue(); rows.Add(new WordRow(f, c)); }
+        rows.Reverse();
         WordList.ItemsSource = rows;
         DictStats.Text = Loc.F("D.Stats", user.WordCount, (_app.Prediction.Russian?.Count ?? 0) + (_app.Prediction.English?.Count ?? 0));
         if (_section == "dict") Anim.Pulse(WordList);
@@ -609,7 +621,7 @@ internal partial class SettingsWindow : Window
             Anim.Remove(c, () =>
             {
                 if (--pending > 0) return;
-                foreach (var row in rows) _app.Prediction.User.Remove(row.Form);
+                _app.Prediction.User.RemoveMany(rows.Select(r => r.Form));
                 RefreshWords();
             });
         }
@@ -643,43 +655,61 @@ internal partial class SettingsWindow : Window
         });
     }
 
-    private void ExportDict_Click(object sender, RoutedEventArgs e)
+    private async void ExportDict_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new SaveFileDialog { FileName = "type9-dictionary.tsv", Filter = Loc.T("D.FilterDict") };
-        if (dlg.ShowDialog(this) == true) File.WriteAllText(dlg.FileName, _app.Prediction.User.Serialize());
+        if (dlg.ShowDialog(this) != true) return;
+        var text = _app.Prediction.User.Serialize();
+        try { await Task.Run(() => File.WriteAllText(dlg.FileName, text)); }
+        catch (Exception ex) { DictStats.Text = Loc.F("D.Error", ex.Message); Anim.Play(DictStats, 4); }
     }
 
-    private void ImportDict_Click(object sender, RoutedEventArgs e)
+    // Импорт и обучение разбираются в фоне в отдельную модель (личный словарь трогаем только из UI-потока),
+    // затем одним слиянием добавляются к словарю — большой файл не подвешивает подсказки и колесо
+    private async void ImportDict_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new OpenFileDialog { Filter = Loc.T("D.FilterDict") };
         if (dlg.ShowDialog(this) != true) return;
         try
         {
-            _app.Prediction.User.Merge(File.ReadAllText(dlg.FileName));
+            var parsed = await Task.Run(() => UserModel.Parse(File.ReadAllText(dlg.FileName)));
+            _app.Prediction.User.MergeFrom(parsed);
             _app.SaveDictionary(false);
             RefreshWords();
         }
         catch (Exception ex) { DictStats.Text = Loc.F("D.ImportFail", ex.Message); }
     }
 
-    private void Train_Click(object sender, RoutedEventArgs e) => Train(TrainText.Text);
+    private void Train_Click(object sender, RoutedEventArgs e) => Train(TrainText.Text, null);
 
     private void TrainFile_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new OpenFileDialog { Filter = Loc.T("D.FilterTxt"), Multiselect = true };
         if (dlg.ShowDialog(this) != true) return;
-        try { Train(string.Join("\n", dlg.FileNames.Select(File.ReadAllText))); }
-        catch (Exception ex) { TrainResult.Text = Loc.F("D.Error", ex.Message); }
+        var files = dlg.FileNames;
+        Train(null, files);
     }
 
-    private void Train(string text)
+    /// <param name="text">Текст из поля; или <paramref name="files"/> — файлы, прочитанные в фоне.</param>
+    private async void Train(string? text, string[]? files)
     {
-        if (string.IsNullOrWhiteSpace(text)) { TrainResult.Text = Loc.T("D.NoText"); Anim.Play(TrainResult, 4); return; }
-        int n = _app.Prediction.User.Train(text);
-        _app.SaveDictionary(false);
-        TrainResult.Text = Loc.F("D.Trained", n);
-        Anim.Play(TrainResult, 4);
-        RefreshWords();
+        try
+        {
+            var knownForm = _app.Prediction.User.KnownForm;
+            var (model, n) = await Task.Run(() =>
+            {
+                var t = text ?? string.Join("\n", files!.Select(File.ReadAllText));
+                var m = new UserModel { KnownForm = knownForm };
+                return (m, string.IsNullOrWhiteSpace(t) ? -1 : m.Train(t));
+            });
+            if (n < 0) { TrainResult.Text = Loc.T("D.NoText"); Anim.Play(TrainResult, 4); return; }
+            _app.Prediction.User.MergeFrom(model);
+            _app.SaveDictionary(false);
+            TrainResult.Text = Loc.F("D.Trained", n);
+            Anim.Play(TrainResult, 4);
+            RefreshWords();
+        }
+        catch (Exception ex) { TrainResult.Text = Loc.F("D.Error", ex.Message); Anim.Play(TrainResult, 4); }
     }
 
     // ------------------------------------------------------------------ исключения
@@ -721,14 +751,22 @@ internal partial class SettingsWindow : Window
         });
     }
 
+    private static bool SoftwareRendering =>
+        SystemParameters.IsRemoteSession || (RenderCapability.Tier >> 16) == 0;
+
     private void PickProcess_Click(object sender, RoutedEventArgs e)
     {
-        var names = Process.GetProcesses()
-            .Where(p => { try { return p.MainWindowHandle != IntPtr.Zero && p.Id != Environment.ProcessId; } catch { return false; } })
-            .Select(p => p.ProcessName)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        // Процессы с видимыми окнами верхнего уровня: один проход EnumWindows вместо MainWindowHandle у каждого процесса
+        // (на сервере терминалов процессов сотни, и каждый MainWindowHandle перебирает все окна)
+        var pids = Native.Win32.VisibleTopLevelProcessIds();
+        pids.Remove((uint)Environment.ProcessId);
+        var names = new List<string>();
+        foreach (var pid in pids)
+        {
+            try { using var p = Process.GetProcessById((int)pid); names.Add(p.ProcessName); }
+            catch { /* процесс уже завершился */ }
+        }
+        names = names.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
         var menu = new ContextMenu { PlacementTarget = PickProcessButton, Placement = PlacementMode.Bottom, MaxHeight = 420 };
         foreach (var n in names)
         {

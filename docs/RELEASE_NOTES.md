@@ -1,5 +1,5 @@
-**RU** — Исправление опечаток («приет» → «привет»), заглавная буква в начале предложения, подсказки больше не предлагаются капсом. Добавлен словарь деловых слов, CapsLock распознаётся надёжнее.
+**RU** — Словарь стал в разы больше и знает рабочую лексику (IT, логистика, продажи, юристы, бухгалтерия); точнее падежи и следующее слово. Исправление опечатки — первым вариантом. Личный словарь больше не запоминает слова капсом и учится на всём, что вы набираете. Круговое меню плавнее, интерфейс быстрее.
 
-**EN** — Typo fixes ("приет" → "привет"), capital letter at the start of a sentence, no more ALL-CAPS suggestions. Added a business vocabulary; CapsLock is detected more reliably.
+**EN** — A much larger dictionary with work vocabulary (IT, logistics, sales, legal, accounting); better word endings and next-word guesses. The typo fix is now always the first option. The personal dictionary no longer stores words in ALL CAPS and learns from everything you type. Smoother phrase wheel, snappier interface.
 
 `Type9.exe` — один файл / single file. Старые версии обновятся сами / older versions update automatically.

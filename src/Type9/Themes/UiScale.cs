@@ -121,6 +121,16 @@ public static class Anim
         shift.Animate(TranslateTransform.YProperty, 0, Motion.Slow, Motion.EaseOutStrong);
     }
 
+    /// <summary>Появление только сдвигом, без прозрачности (дёшево при программной отрисовке).</summary>
+    public static void Slide(FrameworkElement fe, double offset = 8)
+    {
+        fe.BeginAnimation(UIElement.OpacityProperty, null);
+        fe.Opacity = 1;
+        var shift = new TranslateTransform(0, offset);
+        fe.RenderTransform = shift;
+        shift.Animate(TranslateTransform.YProperty, 0, Motion.Slow, Motion.EaseOutStrong);
+    }
+
     /// <summary>Плавно убирает элемент (сжатие + исчезновение), затем вызывает удаление из коллекции.</summary>
     public static void Remove(FrameworkElement? fe, Action remove)
     {

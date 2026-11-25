@@ -95,45 +95,59 @@ internal sealed class SuggestionPopup : Window
         };
     }
 
+    /// <summary>Элементы одной строки — создаются один раз и переиспользуются (плашка обновляется на каждое нажатие).</summary>
+    private sealed class Row
+    {
+        public required Grid Root;
+        public required Run Marker, Typed, Rest;
+        public required TextBlock Badge;
+    }
+
+    private readonly List<Row> _rows = [];
+
     public void SetItems(IReadOnlyList<Suggestion> items, int selected)
     {
         _current = items;
-        _items.Children.Clear();
-        for (int i = 0; i < items.Count; i++) _items.Children.Add(CreateRow(items[i], i));
+        while (_rows.Count < items.Count) _rows.Add(CreateRow(_rows.Count));
+        // Лишние строки убираем из дерева, но не уничтожаем — пригодятся на следующем нажатии
+        while (_items.Children.Count > items.Count) _items.Children.RemoveAt(_items.Children.Count - 1);
+        for (int i = 0; i < items.Count; i++)
+        {
+            var s = items[i];
+            var r = _rows[i];
+            var marker = s.Kind switch { SuggestionKind.NextWord => "→ ", SuggestionKind.Correction => "✎ ", _ => "" };
+            if (r.Marker.Text != marker) r.Marker.Text = marker;
+            if (r.Typed.Text != s.Typed) r.Typed.Text = s.Typed;
+            if (r.Rest.Text != s.Rest) r.Rest.Text = s.Rest;
+            if (i >= _items.Children.Count) _items.Children.Add(r.Root);
+        }
         _hint.Visibility = items.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         Select(selected, animate: false);
     }
 
-    private FrameworkElement CreateRow(Suggestion s, int index)
+    private Row CreateRow(int index)
     {
         var row = new Grid { Height = ItemH, Background = Brushes.Transparent, Cursor = Cursors.Hand };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var text = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 10, 0), FontSize = 14, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 380 };
-        if (s.Kind is SuggestionKind.NextWord or SuggestionKind.Correction)
-        {
-            var arrow = new System.Windows.Documents.Run(s.Kind == SuggestionKind.NextWord ? "→ " : "✎ ") { FontSize = 12 };
-            arrow.SetResourceReference(TextElement.ForegroundProperty, "B.FgMuted");
-            text.Inlines.Add(arrow);
-        }
-        if (s.Typed.Length > 0)
-        {
-            var typed = new System.Windows.Documents.Run(s.Typed);
-            typed.SetResourceReference(TextElement.ForegroundProperty, "B.FgMuted");
-            text.Inlines.Add(typed);
-        }
-        var rest = new System.Windows.Documents.Run(s.Rest) { FontWeight = FontWeights.SemiBold };
+        var marker = new Run { FontSize = 12 };
+        marker.SetResourceReference(TextElement.ForegroundProperty, "B.FgMuted");
+        var typed = new Run();
+        typed.SetResourceReference(TextElement.ForegroundProperty, "B.FgMuted");
+        var rest = new Run { FontWeight = FontWeights.SemiBold };
         rest.SetResourceReference(TextElement.ForegroundProperty, "B.Fg");
+        text.Inlines.Add(marker);
+        text.Inlines.Add(typed);
         text.Inlines.Add(rest);
         row.Children.Add(text);
 
         var tag = new Border { CornerRadius = new CornerRadius(4), Padding = new Thickness(6, 1, 6, 2), Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, BorderThickness = new Thickness(1) };
         tag.SetResourceReference(Border.BorderBrushProperty, "B.Line");
-        var tagText = new TextBlock { Text = Badge(index), FontSize = 11.5 };
+        var tagText = new TextBlock { FontSize = 11.5 };
         tagText.SetResourceReference(TextBlock.ForegroundProperty, "B.FgMuted");
         tag.Child = tagText;
-        tag.Tag = "badge";
         Grid.SetColumn(tag, 1);
         row.Children.Add(tag);
 
@@ -145,7 +159,7 @@ internal sealed class SuggestionPopup : Window
         row.Children.Insert(0, hover);
         row.MouseEnter += (_, _) => hover.Animate(OpacityProperty, 1, Motion.Fast, Motion.EaseOut);
         row.MouseLeave += (_, _) => hover.Animate(OpacityProperty, 0, Motion.Normal, Motion.EaseOut);
-        return row;
+        return new Row { Root = row, Marker = marker, Typed = typed, Rest = rest, Badge = tagText };
     }
 
     public void Select(int index, bool animate = true)
@@ -159,10 +173,10 @@ internal sealed class SuggestionPopup : Window
             _highlightShift.Y = y;
         }
         // Подсказка клавиши «Tab» — у выбранного варианта
-        for (int i = 0; i < _items.Children.Count; i++)
+        for (int i = 0; i < _current.Count && i < _rows.Count; i++)
         {
-            if (_items.Children[i] is Grid g && g.Children.OfType<Border>().FirstOrDefault(b => "badge".Equals(b.Tag)) is { Child: TextBlock tb })
-                tb.Text = Badge(i);
+            var badge = Badge(i);
+            if (_rows[i].Badge.Text != badge) _rows[i].Badge.Text = badge;
         }
     }
 

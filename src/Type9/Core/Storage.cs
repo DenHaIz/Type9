@@ -47,10 +47,45 @@ internal static class Storage
         }
     }
 
-    public static void Save<T>(string path, T value, JsonTypeInfo<T> info) =>
-        WriteAtomic(path, JsonSerializer.Serialize(value, info));
+    public static void Save<T>(string path, T value, JsonTypeInfo<T> info)
+    {
+        var json = JsonSerializer.Serialize(value, info);
+        lock (WriteSync)
+        {
+            Pending.Remove(path); // более свежее содержимое — отложенная фоновая запись больше не нужна
+            WriteAtomic(path, json);
+        }
+    }
+
+    /// <summary>
+    /// Сериализация сейчас (в вызывающем потоке), запись на диск — в фоне: сброс на диск и замена файла не задерживают UI
+    /// (папка %AppData% на сервере терминалов бывает сетевой). Из нескольких отложенных записей файла пишется последняя.
+    /// </summary>
+    public static void SaveInBackground<T>(string path, T value, JsonTypeInfo<T> info)
+    {
+        var json = JsonSerializer.Serialize(value, info);
+        lock (WriteSync) Pending[path] = json;
+        Task.Run(() =>
+        {
+            lock (WriteSync)
+            {
+                if (Pending.Remove(path, out var latest)) WriteAtomic(path, latest);
+            }
+        });
+    }
+
+    /// <summary>Дописать отложенные фоновые записи (при выходе).</summary>
+    public static void Flush()
+    {
+        lock (WriteSync)
+        {
+            foreach (var (path, json) in Pending.ToList()) WriteAtomic(path, json);
+            Pending.Clear();
+        }
+    }
 
     private static readonly object WriteSync = new();
+    private static readonly Dictionary<string, string> Pending = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Запись через временный файл с уникальным именем и сбросом на диск, затем атомарная замена.

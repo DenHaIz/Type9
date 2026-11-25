@@ -41,7 +41,7 @@ public class ModelTests(ITestOutputHelper output)
         Assert.Equal("месте", Words(Engine(), "привет как дела что думаешь о этом мес")[0]);
 
     [Theory]
-    [InlineData("я живу в мос", "москве")]
+    [InlineData("я живу в мос", "Москве")]   // имя собственное — с заглавной
     [InlineData("спасибо за пом", "помощь")]
     [InlineData("добрый д", "день,")]
     [InlineData("с уваж", "уважением")]
