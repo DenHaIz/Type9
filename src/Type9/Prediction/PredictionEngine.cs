@@ -10,7 +10,9 @@ public sealed record PredictionOptions(
     bool NextWord = true,
     int NextWordMinCount = 2,
     SuggestLanguage Language = SuggestLanguage.Russian,
-    bool GreetingComma = true);
+    bool GreetingComma = true,
+    bool Corrections = true,
+    bool AutoCapitalize = true);
 
 /// <summary>
 /// Ранжирование вариантов. Оценка слова — смесь вероятностей:
@@ -21,11 +23,17 @@ public sealed record PredictionOptions(
 public sealed class PredictionEngine
 {
     private const double WUserCtx = 2.0, WBaseCtx = 1.0, WBaseUni = 1.0, WUserUni = 0.35, WExtraUni = 0.0005;
+
+    /// <summary>Частота, которую получает слово делового словаря (как у умеренно частого слова корпуса).</summary>
+    public const double SupplementFreq = 2e-5;
     private const int UnigramShortlist = 400;
 
     public LanguageModel? Russian { get; set; }
     public LanguageModel? English { get; set; }
     public BaseDictionary Extra { get; set; } = BaseDictionary.Empty;
+
+    /// <summary>Встроенный деловой словарь (русский): слова, которых нет в модели по субтитрам.</summary>
+    public BaseDictionary Supplement { get; set; } = BaseDictionary.Empty;
     public UserModel User { get; set; } = new();
     public IReadOnlyList<Abbreviation> Abbreviations { get; set; } = [];
 
@@ -71,13 +79,44 @@ public sealed class PredictionEngine
 
             var script = ScriptOf(ctx.Word);
             if (ctx.Word.Length >= Math.Max(1, o.MinPrefix) && Allowed(script, o.Language))
-                result.AddRange(Completions(ctx, ModelFor(script), o, space).Take(Math.Max(0, o.MaxResults - result.Count)));
+            {
+                var model = ModelFor(script);
+                var comps = Completions(ctx, model, o, space).ToList();
+                var fixes = new List<Suggestion>();
+                if (o.Corrections)
+                {
+                    string? p1 = ctx.Prev1 is null ? null : CaseHelper.Normalize(ctx.Prev1);
+                    string? p2 = ctx.Prev2 is null ? null : CaseHelper.Normalize(ctx.Prev2);
+                    foreach (var (key, form) in Corrections(ctx.Word, model, prefixMode: true))
+                    {
+                        var punct = o.GreetingComma && Greeting.NeedsComma(key, p1, p2) ? "," : "";
+                        var text = CaseHelper.Apply(ctx.Word, form, o.AutoCapitalize && ctx.SentenceStart) + punct;
+                        comps.RemoveAll(c => string.Equals(c.Display.TrimEnd(','), text.TrimEnd(','), StringComparison.OrdinalIgnoreCase));
+                        fixes.Add(new Suggestion(SuggestionKind.Correction, "", text, text + space, ctx.Word.Length));
+                    }
+                }
+                // Исправление в разы частотнее всего, что начинается с набранного: такие дополнения — мусор корпуса
+                result.AddRange(fixes.Count > 0 ? fixes : comps);
+            }
         }
-        else if (ctx.Prev1 is not null && (o.MinPrefix == 0 || o.NextWord))
+        else if (ctx.Prev1 is not null)
         {
             var script = ScriptOf(ctx.Prev1);
             if (Allowed(script, o.Language))
-                result.AddRange(NextWords(ctx, o.MinPrefix == 0 ? ModelFor(script) : null, o, space));
+            {
+                // Слово только что закончено пробелом — если в нём опечатка, первым вариантом предлагаем исправить его
+                if (o.Corrections && ctx.Gap.Length is >= 1 and <= 3 && ctx.Gap[^1] == ' '
+                    && ctx.Gap.All(c => c is ' ' or ',' or '!' or '?' or ':' or ';')
+                    && Corrections(ctx.Prev1, ModelFor(script), prefixMode: false) is [var (key, form), ..])
+                {
+                    var p2 = ctx.Prev2 is null ? null : CaseHelper.Normalize(ctx.Prev2);
+                    var gap = ctx.Gap == " " && o.GreetingComma && Greeting.NeedsComma(key, p2, null) ? ", " : ctx.Gap;
+                    var text = CaseHelper.Apply(ctx.Prev1, form);
+                    result.Add(new Suggestion(SuggestionKind.Correction, "", text + gap.TrimEnd(' '), text + gap, ctx.Prev1.Length + ctx.Gap.Length));
+                }
+                if (o.MinPrefix == 0 || o.NextWord)
+                    result.AddRange(NextWords(ctx, o.MinPrefix == 0 ? ModelFor(script) : null, o, space));
+            }
         }
 
         return result.Count > o.MaxResults ? result.GetRange(0, o.MaxResults) : result;
@@ -137,6 +176,11 @@ public sealed class PredictionEngine
             }
         }
 
+        if (script == Script.Cyrillic)
+            foreach (var (key, form, weight) in Supplement.ByPrefix(prefix))
+                if (key.Length > prefix.Length)
+                    Get(key, form).BaseUni += SupplementFreq * weight;
+
         foreach (var (key, form, score) in Extra.ByPrefix(prefix))
             if (key.Length > prefix.Length && ScriptOf(key) == script)
                 Get(key, form).BaseUni += WExtraUni * score;
@@ -171,11 +215,32 @@ public sealed class PredictionEngine
                 score *= 1 + 0.03 * Math.Min(kv.Key.Length - prefix.Length, 8);
                 return (kv.Key, c.Form, Score: score);
             })
-            .Where(x => x.Score > 0 && x.Key.Length > prefix.Length)
+            .Where(x => x.Score > 0 && x.Key.Length > prefix.Length && (!Profanity.IsObscene(x.Key) || OwnWord(x.Key)))
             .OrderByDescending(x => x.Score)
             .ThenBy(x => x.Key.Length)
+            // Слово корпуса без поддержки контекста, у которого есть намного более частый «сосед» в одну букву, —
+            // скорее всего опечатка из субтитров («здраствуйте»): не предлагаем
+            .Where(x => !(o.Corrections && model is not null && cands[x.Key] is { BaseCtx: 0, UserCtx: 0, UserUni: 0 }
+                          && Corrector.Find(model, x.Key, prefixMode: false, max: 1).Count > 0))
             .Take(o.MaxResults)
-            .Select(x => MakeCompletion(ctx.Word, x.Form, space, o.GreetingComma && Greeting.NeedsComma(x.Key, p1, p2) ? "," : ""));
+            .Select(x => MakeCompletion(ctx.Word, x.Form, space, o.GreetingComma && Greeting.NeedsComma(x.Key, p1, p2) ? "," : "",
+                                        o.AutoCapitalize && ctx.SentenceStart));
+    }
+
+    /// <summary>Слово, которое пользователь сам писал хотя бы дважды.</summary>
+    private bool OwnWord(string key) => (User.Get(key)?.Count ?? 0) >= 2;
+
+    /// <summary>Исправления опечатки в набранном слове (или префиксе), если слово не знакомо пользователю.</summary>
+    private List<(string Key, string Form)> Corrections(string typed, LanguageModel? model, bool prefixMode)
+    {
+        if (model is null || typed.Length < 3 || !typed.All(char.IsLetter)) return [];
+        var key = CaseHelper.Normalize(typed);
+        // Слово, которое пользователь уже писал (хотя бы дважды) или которое есть в его словарях, — не опечатка
+        if (prefixMode
+                ? User.ByPrefix(key).Any(x => x.Stat.Count >= 2) || Extra.ByPrefix(key).Any() || Supplement.ByPrefix(key).Any()
+                : (User.Get(key)?.Count ?? 0) >= 2 || Extra.Contains(key) || Supplement.Contains(key))
+            return [];
+        return Corrector.Find(model, key, prefixMode, extra: Supplement).Select(c => (c.Key, c.Form)).ToList();
     }
 
     private static IEnumerable<int> TopByUnigram(LanguageModel model, int from, int to, int prefixLen)
@@ -203,9 +268,10 @@ public sealed class PredictionEngine
     }
 
     /// <param name="punct">Знак сразу после слова — запятая после приветствия («Здравствуйте,»).</param>
-    internal static Suggestion MakeCompletion(string typed, string form, string space, string punct = "")
+    /// <param name="capitalize">Начало предложения — первая буква заглавная (набранное слово заменяется целиком).</param>
+    internal static Suggestion MakeCompletion(string typed, string form, string space, string punct = "", bool capitalize = false)
     {
-        var applied = CaseHelper.Apply(typed, form);
+        var applied = CaseHelper.Apply(typed, form, capitalize);
         if (applied.StartsWith(typed, StringComparison.Ordinal))
             return new Suggestion(SuggestionKind.Completion, typed, applied[typed.Length..] + punct, applied[typed.Length..] + punct + space, 0);
         // Префикс отличается (например, «е»/«ё» или регистр) — заменяем слово целиком
@@ -225,6 +291,7 @@ public sealed class PredictionEngine
         void Add(string key, string form, double s)
         {
             if (key.Length < 3 || key == p1 || ScriptOf(key) != script) return; // короткие слова быстрее напечатать
+            if (Profanity.IsObscene(key) && !OwnWord(key)) return;
             scores[key] = scores.TryGetValue(key, out var cur) ? (cur.Form, cur.Score + s) : (form, s);
         }
 

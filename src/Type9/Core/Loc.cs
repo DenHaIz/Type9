@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 
 namespace Type9.Core;
@@ -83,6 +83,10 @@ public static class Loc
         ["G.SmartPunct"] = ("Умная пунктуация", "Smart punctuation"),
         ["G.CapsCycle"] = ("CapsLock — следующий вариант", "CapsLock — next option"),
         ["G.CapsCycleHint"] = ("Пока видна подсказка, CapsLock выбирает варианты сверху вниз по кругу, а не меняет регистр", "While suggestions are shown, CapsLock steps through them top to bottom (wrapping) instead of toggling case"),
+        ["G.FixTypos"] = ("Исправлять опечатки", "Fix typos"),
+        ["G.FixTyposHint"] = ("«приет» → «привет», «выедал» → «выехал». Исправление — первым вариантом, со значком ✎; сразу после пробела можно исправить только что набранное слово", "\"teh\" → \"the\". The fix is shown first, marked ✎; right after a space it can fix the word you just typed"),
+        ["G.AutoCap"] = ("Заглавная в начале предложения", "Capitalize sentences"),
+        ["G.AutoCapHint"] = ("После точки, «!», «?» и новой строки подсказка начинается с заглавной. Внутри предложения — как набрано", "After a period, \"!\", \"?\" or a new line the suggestion starts with a capital letter; mid-sentence it follows what you typed"),
         ["G.GreetingComma"] = ("Запятая после приветствия", "Comma after a greeting"),
         ["G.GreetingCommaHint"] = ("«Здравствуйте,», «Добрый день,» — при вставке подсказкой. Наберёте «!» — запятая заменится", "\"Hello,\", \"Good morning,\" when inserted from a suggestion. Typing \"!\" replaces the comma"),
         ["G.SmartPunctHint"] = ("Запятая или точка сразу после подсказки «притягиваются» к слову", "A comma or period typed right after a suggestion snaps to the word"),

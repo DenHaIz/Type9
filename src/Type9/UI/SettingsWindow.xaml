@@ -274,6 +274,18 @@
                                             <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.CapsCycleHint}" />
                                         </StackPanel>
                                     </CheckBox>
+                                    <CheckBox IsChecked="{Binding FixTypos}" Margin="0,0,0,14">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.FixTypos}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.FixTyposHint}" />
+                                        </StackPanel>
+                                    </CheckBox>
+                                    <CheckBox IsChecked="{Binding AutoCapitalize}" Margin="0,0,0,14">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.AutoCap}" />
+                                            <TextBlock Style="{StaticResource T.Muted}" Text="{DynamicResource S.G.AutoCapHint}" />
+                                        </StackPanel>
+                                    </CheckBox>
                                     <CheckBox IsChecked="{Binding GreetingComma}" Margin="0,0,0,14">
                                         <StackPanel>
                                             <TextBlock Style="{StaticResource RowTitle}" Text="{DynamicResource S.G.GreetingComma}" />

@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -11,7 +11,7 @@
     <AssemblyName>Type9</AssemblyName>
     <RootNamespace>Type9</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.3.4</Version>
+    <Version>0.3.5</Version>
     <Product>Type9</Product>
     <Description>Автодополнение и круговое меню фраз для Windows</Description>
     <SatelliteResourceLanguages>en;ru</SatelliteResourceLanguages>
@@ -39,6 +39,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\Dict\*.t9lm" />
+    <EmbeddedResource Include="Resources\Dict\*.txt" />
   </ItemGroup>
 
   <ItemGroup>

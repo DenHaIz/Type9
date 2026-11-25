@@ -4,6 +4,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Threading;
 using Type9.Input;
+using Type9.Native;
 using Type9.Prediction;
 using Type9.Themes;
 using Type9.UI;
@@ -18,6 +19,8 @@ internal sealed class AppController : IInputSink, IDisposable
     private readonly RadialMenuWindow _radial = new();
     private readonly CaretLocator _caret;
     private readonly DispatcherTimer _dictSaveTimer;
+    private readonly DispatcherTimer _capsPoll;
+    private bool _capsSeen;
     private readonly DispatcherTimer _settingsSaveTimer;
     private readonly DispatcherTimer _phrasesSaveTimer;
     private TrayIcon? _tray;
@@ -46,6 +49,13 @@ internal sealed class AppController : IInputSink, IDisposable
         _popup.CapsLockCycles = settings.CapsLockCycles;
 
         _dictSaveTimer = new DispatcherTimer(TimeSpan.FromSeconds(30), DispatcherPriority.Background, (_, _) => SaveDictionary(false), ui);
+        // CapsLock: сверяемся с системой и поправляем отслеживание, только когда состояние реально сменилось
+        _capsPoll = new DispatcherTimer(TimeSpan.FromMilliseconds(300), DispatcherPriority.Background, (_, _) =>
+        {
+            bool on = (Win32.GetKeyState(Win32.VK_CAPITAL) & 1) != 0;
+            if (on != _capsSeen) { _capsSeen = on; Engine.SyncCapsLock(on); }
+        }, ui);
+        _capsSeen = (Win32.GetKeyState(Win32.VK_CAPITAL) & 1) != 0;
         _settingsSaveTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(400), DispatcherPriority.Background, (_, _) =>
         {
             _settingsSaveTimer!.Stop();
@@ -73,6 +83,7 @@ internal sealed class AppController : IInputSink, IDisposable
         Task.Run(() =>
         {
             var extras = BaseDictionary.LoadExtras();
+            var supplement = BaseDictionary.LoadEmbedded("ru.business");
             UserModel? user = null;
             // Файл может быть временно занят (антивирус, OneDrive) — несколько попыток; при неудаче словарь
             // не перезаписываем пустым до конца сеанса, а повреждённый файл сохраняем копией .broken
@@ -91,6 +102,7 @@ internal sealed class AppController : IInputSink, IDisposable
             _ui.BeginInvoke(() =>
             {
                 Prediction.Extra = extras;
+                Prediction.Supplement = supplement;
                 // Слова, выученные, пока словарь грузился, не теряем — переносим в загруженный
                 var early = Prediction.User;
                 if (early.WordCount > 0) user!.Merge(early.Serialize());
@@ -237,7 +249,8 @@ internal sealed class AppController : IInputSink, IDisposable
     // ------------------------------------------------------------------ подсказки
 
     private PredictionOptions Options => new(Settings.MinPrefix, Settings.MaxSuggestions, Settings.AddSpaceAfterWord,
-        Settings.NextWordPrediction, Settings.NextWordMinCount, Settings.SuggestLanguage, Settings.GreetingComma);
+        Settings.NextWordPrediction, Settings.NextWordMinCount, Settings.SuggestLanguage, Settings.GreetingComma,
+        Settings.FixTypos, Settings.AutoCapitalize);
 
     private DispatcherTimer? _learnIdleTimer;
 
@@ -256,14 +269,14 @@ internal sealed class AppController : IInputSink, IDisposable
         }
 
         var items = Prediction.Predict(ctx, Options);
-        if (!Engine.SetSuggestions(version, items)) return; // контекст уже устарел
+        if (!Engine.SetSuggestions(version, items, out int selected)) return; // контекст уже устарел
         if (items.Count == 0)
         {
             HideSuggestions();
             return;
         }
 
-        _popup.SetItems(items, 0);
+        _popup.SetItems(items, selected);
         _caret.Request(version, (v, info) =>
         {
             if (info.IsPassword)

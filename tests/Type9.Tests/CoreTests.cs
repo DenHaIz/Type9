@@ -73,7 +73,7 @@ public class CaseHelperTests
 {
     [Theory]
     [InlineData("Здр", "здравствуйте", "Здравствуйте")]
-    [InlineData("ЗДР", "здравствуйте", "ЗДРАВСТВУЙТЕ")]
+    [InlineData("ЗДР", "здравствуйте", "Здравствуйте")]
     [InlineData("здр", "здравствуйте", "здравствуйте")]
     [InlineData("iph", "iPhone", "iPhone")]
     public void AppliesCase(string typed, string candidate, string expected) =>

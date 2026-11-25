@@ -30,6 +30,10 @@ public sealed class AppSettings
     public bool AddSpaceAfterWord { get; set; } = true;
     public bool SmartPunctuation { get; set; } = true;
     public bool GreetingComma { get; set; } = true;
+    /// <summary>Предлагать исправление опечаток («приет» → «привет»).</summary>
+    public bool FixTypos { get; set; } = true;
+    /// <summary>Заглавная буква в начале предложения (после «. », «! », «? », перевода строки).</summary>
+    public bool AutoCapitalize { get; set; } = true;
     /// <summary>CapsLock при видимой подсказке переключает вариант (по кругу), а не регистр.</summary>
     public bool CapsLockCycles { get; set; }
     public bool NextWordPrediction { get; set; } = true;

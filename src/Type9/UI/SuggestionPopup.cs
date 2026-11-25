@@ -111,9 +111,9 @@ internal sealed class SuggestionPopup : Window
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var text = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 10, 0), FontSize = 14, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 380 };
-        if (s.Kind == SuggestionKind.NextWord)
+        if (s.Kind is SuggestionKind.NextWord or SuggestionKind.Correction)
         {
-            var arrow = new System.Windows.Documents.Run("→ ") { FontSize = 12 };
+            var arrow = new System.Windows.Documents.Run(s.Kind == SuggestionKind.NextWord ? "→ " : "✎ ") { FontSize = 12 };
             arrow.SetResourceReference(TextElement.ForegroundProperty, "B.FgMuted");
             text.Inlines.Add(arrow);
         }

@@ -1,6 +1,7 @@
-namespace Type9.Prediction;
+﻿namespace Type9.Prediction;
 
-public enum SuggestionKind { Completion, NextWord, Abbreviation }
+/// <summary>Correction — исправление опечатки: набранное слово стирается целиком.</summary>
+public enum SuggestionKind { Completion, NextWord, Abbreviation, Correction }
 
 /// <summary>
 /// Вариант подсказки. <see cref="Backspaces"/> символов стирается, затем печатается <see cref="Insert"/>.

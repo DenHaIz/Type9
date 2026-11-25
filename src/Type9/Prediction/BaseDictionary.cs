@@ -68,6 +68,42 @@ public sealed class BaseDictionary
         return new BaseDictionary(keys, forms, scores);
     }
 
+    /// <summary>
+    /// Встроенный словарь-дополнение (Resources/Dict/&lt;name&gt;.txt): словоформы через пробел, строки с # — комментарии.
+    /// Первая форма в строке (начальная) важнее остальных: оценка 1, затем по убыванию до 0,3.
+    /// </summary>
+    public static BaseDictionary LoadEmbedded(string name)
+    {
+        var asm = System.Reflection.Assembly.GetExecutingAssembly();
+        var res = asm.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith($".Dict.{name}.txt", StringComparison.Ordinal));
+        if (res is null) return Empty;
+        using var s = asm.GetManifestResourceStream(res)!;
+        var best = new Dictionary<string, (string Form, float Score)>(StringComparer.Ordinal);
+        foreach (var line in ReadLines(s))
+        {
+            if (line.TrimStart().StartsWith('#')) continue;
+            var words = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < words.Length; i++)
+            {
+                var w = words[i];
+                if (w.Length < 2 || !w.All(c => char.IsLetter(c) || c == '-')) continue;
+                var key = CaseHelper.Normalize(w);
+                float score = Math.Max(0.3f, 1 - 0.1f * i);
+                if (!best.TryGetValue(key, out var cur) || cur.Score < score) best[key] = (w, score);
+            }
+        }
+        var keys = best.Keys.ToArray();
+        Array.Sort(keys, StringComparer.Ordinal);
+        return new BaseDictionary(keys, keys.Select(k => best[k].Form).ToArray(), keys.Select(k => best[k].Score).ToArray());
+    }
+
+    /// <summary>Словоформа по ключу (или null).</summary>
+    public string? FormOf(string key)
+    {
+        int i = Array.BinarySearch(_keys, key, StringComparer.Ordinal);
+        return i >= 0 ? _forms[i] : null;
+    }
+
     /// <summary>Дополнительные списки слов пользователя: %AppData%\Type9\dict\*.txt(.gz).</summary>
     public static BaseDictionary LoadExtras()
     {

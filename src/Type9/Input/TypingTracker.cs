@@ -3,7 +3,10 @@
 namespace Type9.Input;
 
 /// <summary>Контекст набора: текущее (недописанное) слово и предыдущие слова того же предложения.</summary>
-public readonly record struct TypingContext(string Word, string? Prev1, string? Prev2, bool NeedsLeadingSpace)
+/// <param name="SentenceStart">Перед словом точно конец предложения («. », «! », перевод строки) — нужна заглавная.</param>
+/// <param name="Gap">Слово ещё не начато: что стоит после предыдущего слова (обычно пробел) — для исправления опечатки в нём.</param>
+public readonly record struct TypingContext(string Word, string? Prev1, string? Prev2, bool NeedsLeadingSpace,
+    bool SentenceStart = false, string Gap = "")
 {
     public static readonly TypingContext Empty = new("", null, null, false);
     public bool IsEmpty => Word.Length == 0 && Prev1 is null;
@@ -106,7 +109,7 @@ public sealed class TypingTracker
         var word = _tail.ToString(i, end - i);
 
         // Предыдущие слова — только внутри текущего предложения
-        string? p1 = null, p2 = null;
+        string? p1 = null, p2 = null, gap = "";
         int j = i;
         for (int n = 0; n < 2; n++)
         {
@@ -121,10 +124,32 @@ public sealed class TypingTracker
             while (j > 0 && (IsWordChar(_tail[j - 1]) || (IsJoiner(_tail[j - 1]) && j - 2 >= 0 && IsWordChar(_tail[j - 2]))))
                 j--;
             var w = _tail.ToString(j, we - j);
-            if (n == 0) p1 = w; else p2 = w;
+            if (n == 0) { p1 = w; gap = _tail.ToString(we, i - we); }
+            else p2 = w;
         }
 
         bool needsSpace = word.Length == 0 && _tail.Length > 0 && !char.IsWhiteSpace(_tail[^1]);
-        return new TypingContext(word, p1, p2, needsSpace);
+        return new TypingContext(word, p1, p2, needsSpace, p1 is null && AfterSentenceEnd(i), word.Length == 0 && p1 is not null ? gap : "");
+    }
+
+    /// <summary>
+    /// Перед позицией — явный конец предложения: «.», «!», «?», «…» и пробел, или перевод строки.
+    /// Пустой хвост (после клика) не считается: что стоит в поле левее, неизвестно.
+    /// Точка после одной буквы («т.е.», «г.») — сокращение, а не конец предложения.
+    /// </summary>
+    private bool AfterSentenceEnd(int pos)
+    {
+        int k = pos;
+        bool space = false;
+        while (k > 0 && _tail[k - 1] is ' ' or '\t' or ' ') { k--; space = true; }
+        if (k == 0) return false;
+        char ch = _tail[k - 1];
+        if (ch == '\n') return true;
+        if (!space || !IsSentenceEnd(ch)) return false;
+        if (ch != '.') return true;
+        // «т.е.» / «г.»: перед точкой одиночная буква
+        int letters = 0;
+        for (int m = k - 2; m >= 0 && IsWordChar(_tail[m]); m--) letters++;
+        return letters != 1;
     }
 }

@@ -65,13 +65,15 @@ internal sealed class InputEngine : IDisposable
     private Win32.RECT _popupRect;
     private readonly object _rectSync = new();
 
-    private bool _capsOn;
+    private volatile bool _capsOn;
+    private int _capsPendingSteps; // CapsLock нажат, пока новые подсказки ещё считаются: применим к ним
     private bool _autoSpace;
     private bool _autoComma;   // запятая, поставленная нами после приветствия (Tab по «Здравствуйте»)
     private int _wheelAcc;     // накопленная дельта колеса над подсказкой
 
     /// <summary>Последняя вставка по Tab, пока Tab зажат: Tab+цифра заменяет её другим вариантом.</summary>
-    private sealed record TabAccept(SuggestionSnapshot Snap, int Index, string Word);
+    /// <param name="Erasable">Текст перед кареткой до вставки — столько, сколько стирает любой из вариантов.</param>
+    private sealed record TabAccept(SuggestionSnapshot Snap, int Index, string Erasable);
     private TabAccept? _tabAccept;
     private bool _tabDown;
     private bool _hotkeyHeld;
@@ -129,12 +131,27 @@ internal sealed class InputEngine : IDisposable
 
     public int Version => Volatile.Read(ref _version);
 
-    /// <summary>UI сообщает рассчитанные подсказки. Принимаются, только если контекст не успел измениться.</summary>
-    public bool SetSuggestions(int version, IReadOnlyList<Suggestion> items)
+    /// <summary>
+    /// UI сообщает рассчитанные подсказки. Принимаются, только если контекст не успел измениться.
+    /// <paramref name="selected"/> — какой вариант выбран (CapsLock мог быть нажат, пока они считались).
+    /// </summary>
+    public bool SetSuggestions(int version, IReadOnlyList<Suggestion> items, out int selected)
     {
+        selected = 0;
         if (version != Version) return false;
-        _snap = items.Count > 0 ? new SuggestionSnapshot(version, items, 0) : null;
+        int steps = Interlocked.Exchange(ref _capsPendingSteps, 0);
+        if (items.Count > 1) selected = steps % items.Count;
+        _snap = items.Count > 0 ? new SuggestionSnapshot(version, items, selected) : null;
         return true;
+    }
+
+    /// <summary>
+    /// Реальное состояние CapsLock (опрос из UI). Своё отслеживание по нажатиям теряется, если CapsLock переключили
+    /// мимо хука: в окне администратора, на экране блокировки, синхронизацией RDP.
+    /// </summary>
+    public void SyncCapsLock(bool on)
+    {
+        if (!_capsDown) _capsOn = on;
     }
 
     public void ClearSuggestions() => _snap = null;
@@ -181,13 +198,16 @@ internal sealed class InputEngine : IDisposable
                 if (!down) _capsCycling = false;
                 return true;
             }
+            // Плашка видна, но после последней буквы подсказки ещё пересчитываются — нажатие всё равно наше:
+            // запоминаем шаг и применяем к новым вариантам (иначе быстрый CapsLock включал бы капс)
             if (down && !_capsDown && !capsIsHotkey && opt.CapsLockCycles && !_paused && !_radialOpen && !_suppressed
                 && opt.SuggestionsEnabled && Hotkey.CurrentModifiers() == HotkeyModifiers.None
-                && _snap is { } cs && cs.Version == Version && cs.Items.Count > 1)
+                && _snap is { } cs && cs.Items.Count > 1)
             {
                 _capsDown = _capsCycling = true;
                 _tabAccept = null;
-                MoveSelection(cs, 1);
+                if (cs.Version == Version) MoveSelection(cs, 1);
+                else Interlocked.Increment(ref _capsPendingSteps);
                 return true;
             }
             if (down && !_capsDown && !capsIsHotkey) _capsOn = !_capsOn;
@@ -355,10 +375,15 @@ internal sealed class InputEngine : IDisposable
             switch (vk)
             {
                 case Win32.VK_TAB:
-                    string word;
-                    lock (_sync) word = _tracker.GetContext().Word;
-                    Accept(snap!, snap!.Selected);
-                    _tabAccept = new TabAccept(snap, snap.Selected, word);
+                    string erasable;
+                    lock (_sync)
+                    {
+                        var tail = _tracker.Tail;
+                        int need = snap!.Items.Max(x => x.Backspaces);
+                        erasable = tail[Math.Max(0, tail.Length - need)..];
+                    }
+                    Accept(snap, snap.Selected);
+                    _tabAccept = new TabAccept(snap, snap.Selected, erasable);
                     return true;
                 case Win32.VK_DOWN or Win32.VK_UP when snap!.Items.Count > 1:
                     MoveSelection(snap, vk == Win32.VK_DOWN ? 1 : -1);
@@ -482,7 +507,7 @@ internal sealed class InputEngine : IDisposable
     {
         var s = last.Snap.Items[last.Index];
         var t = last.Snap.Items[n];
-        var w = last.Word;
+        var w = last.Erasable;
         int bs = Math.Min(s.Backspaces, w.Length), bt = Math.Min(t.Backspaces, w.Length);
         int erase = s.Insert.Length + Math.Max(0, bt - bs);
         string text = (bs > bt ? w.Substring(w.Length - bs, bs - bt) : "") + t.Insert;
@@ -704,6 +729,7 @@ internal sealed class InputEngine : IDisposable
 
     private void Changed()
     {
+        Interlocked.Exchange(ref _capsPendingSteps, 0);
         TypingContext ctx;
         int v;
         lock (_sync)

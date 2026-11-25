@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using Type9.Native;
 
 namespace Type9.Input;
@@ -90,14 +90,17 @@ internal static class TextInjector
 
 public static class CaseHelper
 {
-    /// <summary>Подгоняет регистр варианта под набранный префикс: «Здр»+«здравствуйте» → «Здравствуйте».</summary>
-    public static string Apply(string typed, string candidate)
+    /// <summary>
+    /// Подгоняет регистр варианта под набранное: «Здр»+«здравствуйте» → «Здравствуйте», «доб» → «добрый».
+    /// Капс не переносим («ДОБ» → «Добрый»): регистр набранного известен неточно (CapsLock мог переключиться
+    /// вне нашего хука), а слово капсом почти всегда не то, что нужно. Слова с заглавными внутри («iPhone») не трогаем.
+    /// </summary>
+    /// <param name="capitalize">Начало предложения: первая буква заглавная, даже если набрана строчная.</param>
+    public static string Apply(string typed, string candidate, bool capitalize = false)
     {
-        if (typed.Length == 0 || candidate.Length == 0) return candidate;
-        int letters = typed.Count(char.IsLetter);
-        bool allUpper = letters >= 2 && typed.Where(char.IsLetter).All(char.IsUpper);
-        if (allUpper) return candidate.ToUpperInvariant();
-        if (char.IsUpper(typed[0]) && char.IsLower(candidate[0]))
+        if (candidate.Length == 0 || !char.IsLower(candidate[0])) return candidate;
+        if (candidate.Skip(1).Any(char.IsUpper)) return candidate;
+        if (capitalize || typed.Length > 0 && char.IsUpper(typed[0]))
             return char.ToUpperInvariant(candidate[0]) + candidate[1..];
         return candidate;
     }

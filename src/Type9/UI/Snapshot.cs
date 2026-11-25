@@ -96,6 +96,7 @@ internal static class Snapshot
                 new Suggestion(SuggestionKind.Completion, "Здр", "авствуйте", "", 0),
                 new Suggestion(SuggestionKind.Completion, "Здр", "авствуй", "", 0),
                 new Suggestion(SuggestionKind.Abbreviation, "здр → ", "Здравствуйте,", "", 3),
+                new Suggestion(SuggestionKind.Correction, "", "Привет,", "", 5),
             ], 0);
             popup.ShowAt(new CaretInfo(new Native.Win32.RECT { Left = -20000, Top = -20000, Right = -19999, Bottom = -19980 }, true, false), false);
             await Settle();
